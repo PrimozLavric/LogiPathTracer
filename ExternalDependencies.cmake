@@ -15,7 +15,7 @@ else ()
 endif ()
 
 if (NOT TARGET cpp-glfw)
-    add_subdirectory(libs/cpp-glfw)
+    add_subdirectory(libs/CppGLFW)
 else ()
     message(STATUS "[LogiPathTracer] Target logi_scene_graph is already defined. Using existing target.")
 endif ()
