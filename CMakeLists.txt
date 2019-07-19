@@ -30,6 +30,11 @@ target_include_directories(logi_path_tracer PUBLIC
 
 target_link_libraries(logi_path_tracer logi logi_scene_graph cpp-glfw)
 
+# Copy resources directory.
+add_custom_command(TARGET logi_path_tracer POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/resources ${CMAKE_CURRENT_BINARY_DIR}/resources
+        )
+
 ##########################################################
 ####################### DOXYGEN ##########################
 ##########################################################
