@@ -1,5 +1,6 @@
 
 #define GLFW_INCLUDE_VULKAN
+#include <Renderer.hpp>
 #include <cppglfw/CppGLFW.h>
 #include <logi/logi.hpp>
 #include <vulkan/vulkan.hpp>
@@ -12,9 +13,9 @@ int main() {
   auto b = glfwInstance.getRequiredInstanceExtensions();
 
   vk::InstanceCreateInfo instanceCreateInfo;
-  instanceCreateInfo.logi::createInstance()
+  // instanceCreateInfo.logi::createInstance()
 
-    while (!window.shouldClose()) {
+  while (!window.shouldClose()) {
     glfwInstance.pollEvents();
   }
 
