@@ -1,8 +1,11 @@
 cmake_minimum_required(VERSION 3.10)
+
 set(CMAKE_CXX_STANDARD 17)
 
 # Metadata
 project(LogiPathTracer VERSION 0.1.0 LANGUAGES CXX)
+
+include(${PROJECT_SOURCE_DIR}/cmake_modules/CompileShaders.cmake)
 
 # Add path to CMake custom modules.
 list(INSERT CMAKE_MODULE_PATH 0 "${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules")
@@ -13,7 +16,7 @@ option(BUILD_DOC "Build documentation" OFF)
 option(BUILD_EXAMPLES "Build examples" ON)
 
 ##############################################
-# BUILD LOGI LIBRARY
+# BUILD LOGI PATH TRACER
 ############################################## 
 
 # Libraries path
@@ -34,6 +37,8 @@ target_link_libraries(logi_path_tracer logi LogiSceneGraph CppGLFW)
 add_custom_command(TARGET logi_path_tracer POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/resources ${CMAKE_CURRENT_BINARY_DIR}/resources
         )
+
+compile_shaders(logi_path_tracer shaders)
 
 ##########################################################
 ####################### DOXYGEN ##########################

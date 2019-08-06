@@ -1,0 +1,23 @@
+#version 450
+#extension GL_ARB_separate_shader_objects : enable
+
+#define WIDTH 800
+#define HEIGHT 600
+#define WORKGROUP_SIZE 32
+layout (local_size_x = WORKGROUP_SIZE, local_size_y = WORKGROUP_SIZE, local_size_z = 1) in;
+
+struct Pixel{
+    vec4 value;
+};
+
+layout (binding = 0, rgba32f) uniform image2D accumulationImage;
+
+layout(std140, binding = 1) uniform UniformBufferObject {
+    uvec2 resolution;
+} ubo_;
+
+
+void main() {
+    // store the rendered mandelbrot set into a storage buffer:
+    imageStore(accumulationImage, ivec2(gl_GlobalInvocationID.xy), vec4(1.0, 0.0, 0.0, 1.0));
+}

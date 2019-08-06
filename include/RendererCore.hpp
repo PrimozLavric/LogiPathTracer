@@ -1,10 +1,12 @@
 
-#ifndef LOGIPATHTRACER_RENDERER_HPP
-#define LOGIPATHTRACER_RENDERER_HPP
+#ifndef LOGIPATHTRACER_RENDERERCORE_HPP
+#define LOGIPATHTRACER_RENDERERCORE_HPP
 
 #define GLFW_INCLUDE_VULKAN
 #include <cppglfw/CppGLFW.h>
+#include <fstream>
 #include <logi/logi.hpp>
+#include <map>
 #include <vector>
 
 struct RendererConfiguration {
@@ -21,9 +23,28 @@ struct RendererConfiguration {
   std::vector<const char*> validationLayers;
 };
 
-class Renderer {
+struct ShaderInfo {
+  ShaderInfo(std::string path, std::string entryPoint);
+
+  std::string path;
+  std::string entryPoint;
+};
+
+struct PipelineLayoutData {
+  explicit PipelineLayoutData(std::map<vk::ShaderStageFlagBits, logi::ShaderModule> shaders = {},
+                              logi::PipelineLayout layout = {},
+                              std::vector<logi::DescriptorSetLayout> descriptorSetLayouts = {});
+
+  std::map<vk::ShaderStageFlagBits, logi::ShaderModule> shaders;
+  logi::PipelineLayout layout;
+  std::vector<logi::DescriptorSetLayout> descriptorSetLayouts;
+};
+
+class RendererCore {
  public:
-  explicit Renderer(cppglfw::Window window, const RendererConfiguration& configuration);
+  explicit RendererCore(cppglfw::Window window, const RendererConfiguration& configuration);
+
+  void drawFrame();
 
  protected:
   void createInstance(const std::vector<const char*>& extensions, const std::vector<const char*>& validationLayers);
@@ -40,7 +61,19 @@ class Renderer {
 
   void initializeSwapChain();
 
- private:
+  void recreateSwapChain();
+
+  virtual void onSwapChainRecreate() = 0;
+
+  void buildSyncObjects();
+
+  logi::ShaderModule createShaderModule(const std::string& shaderPath);
+
+  PipelineLayoutData loadPipelineShaders(const std::vector<ShaderInfo>& shaderInfo);
+
+  void initializeCommandBuffers();
+
+ protected:
   cppglfw::Window window_;
   logi::VulkanInstance instance_;
   logi::SurfaceKHR surface_;
@@ -56,6 +89,16 @@ class Renderer {
   std::vector<logi::ImageView> swapchainImageViews_;
   vk::Extent2D swapchainImageExtent_;
   vk::Format swapchainImageFormat_;
+
+  // Synchronization objects
+  logi::Semaphore swapchainImgAvailableSemaphore_;
+  logi::Semaphore renderFinishedSemaphore_;
+  logi::Fence inFlightFence_;
+
+  logi::CommandPool graphicsFamilyCmdPool_;
+  std::vector<logi::CommandBuffer> mainCmdBuffers_;
+
+  size_t currentFrame_ = 0;
 };
 
-#endif // LOGIPATHTRACER_RENDERER_HPP
+#endif // LOGIPATHTRACER_RENDERERCORE_HPP
