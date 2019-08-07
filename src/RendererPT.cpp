@@ -3,6 +3,7 @@
 //
 
 #include "RendererPT.h"
+#include <chrono>
 #include <cmath>
 
 RendererPT::RendererPT(const cppglfw::Window& window, const RendererConfiguration& configuration)
@@ -22,6 +23,7 @@ RendererPT::RendererPT(const cppglfw::Window& window, const RendererConfiguratio
   initializeAccumulationTexture();
   initializeDescriptorSets();
   updateAccumulationTexDescriptorSet();
+  initializeUBOBuffer();
   recordCommandBuffers();
 }
 
@@ -204,63 +206,7 @@ void RendererPT::onSwapChainRecreate() {
   initializeAccumulationTexture();
   updateAccumulationTexDescriptorSet();
   recordCommandBuffers();
-}
-
-void RendererPT::recordCommandBuffers() {
-  // Destroy old command buffers.
-  for (const auto& cmdBuffer : mainCmdBuffers_) {
-    cmdBuffer.reset();
-  }
-
-  for (size_t i = 0; i < mainCmdBuffers_.size(); i++) {
-    vk::CommandBufferBeginInfo beginInfo = {};
-    beginInfo.flags = vk::CommandBufferUsageFlagBits::eSimultaneousUse;
-
-    mainCmdBuffers_[i].begin(beginInfo);
-
-    // Compute shader.
-    mainCmdBuffers_[i].bindPipeline(vk::PipelineBindPoint::eCompute, pathTracingPipeline_);
-    mainCmdBuffers_[i].bindDescriptorSets(
-      vk::PipelineBindPoint::eCompute, pathTracingPipelineLayoutData_.layout, 0,
-      std::vector<vk::DescriptorSet>(pathTracingDescSets_.begin(), pathTracingDescSets_.end()));
-    mainCmdBuffers_[i].dispatch(static_cast<uint32_t>(std::ceil(swapchainImageExtent_.width / float(32))),
-                                static_cast<uint32_t>(std::ceil(swapchainImageExtent_.height / float(32))), 1);
-
-    vk::ImageMemoryBarrier imageMemoryBarrier;
-    imageMemoryBarrier.srcAccessMask = vk::AccessFlagBits::eShaderWrite;
-    imageMemoryBarrier.srcAccessMask = vk::AccessFlagBits::eShaderRead;
-    imageMemoryBarrier.oldLayout = vk::ImageLayout::eGeneral;
-    imageMemoryBarrier.newLayout = vk::ImageLayout::eGeneral;
-    imageMemoryBarrier.image = accumulationTexture_.image;
-    imageMemoryBarrier.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
-    imageMemoryBarrier.subresourceRange.baseArrayLayer = 0u;
-    imageMemoryBarrier.subresourceRange.layerCount = 1u;
-    imageMemoryBarrier.subresourceRange.baseMipLevel = 0u;
-    imageMemoryBarrier.subresourceRange.levelCount = 1u;
-
-    mainCmdBuffers_[i].pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader,
-                                       vk::PipelineStageFlagBits::eFragmentShader, {}, {}, {}, imageMemoryBarrier);
-
-    vk::RenderPassBeginInfo renderPassInfo = {};
-    renderPassInfo.renderPass = texViewerRenderPass_;
-    renderPassInfo.framebuffer = framebuffers_[i];
-    renderPassInfo.renderArea.extent = swapchainImageExtent_;
-
-    vk::ClearValue clearValue;
-    clearValue.color.setFloat32({0.0, 0.0, 0.0, 1.0});
-    renderPassInfo.clearValueCount = 1;
-    renderPassInfo.pClearValues = &clearValue;
-
-    mainCmdBuffers_[i].beginRenderPass(renderPassInfo, vk::SubpassContents::eInline);
-    mainCmdBuffers_[i].bindPipeline(vk::PipelineBindPoint::eGraphics, texViewerPipeline_);
-    mainCmdBuffers_[i].bindDescriptorSets(
-      vk::PipelineBindPoint::eGraphics, texViewerPipelineLayoutData_.layout, 0,
-      std::vector<vk::DescriptorSet>(texViewerDescSets_.begin(), texViewerDescSets_.end()));
-
-    mainCmdBuffers_[i].draw(3);
-    mainCmdBuffers_[i].endRenderPass();
-    mainCmdBuffers_[i].end();
-  }
+  ubo_.sampleCount = 0;
 }
 
 void RendererPT::initializeAccumulationTexture() {
@@ -400,4 +346,102 @@ void RendererPT::updateAccumulationTexDescriptorSet() {
   descriptorWrites[1].pImageInfo = &pathTracerTextureDescriptor;
 
   logicalDevice_.updateDescriptorSets(descriptorWrites);
+}
+
+void RendererPT::initializeUBOBuffer() {
+  VmaAllocationCreateInfo allocationInfo = {};
+  allocationInfo.usage = VmaMemoryUsage::VMA_MEMORY_USAGE_CPU_TO_GPU;
+
+  // Create and init matrices UBO buffer.
+  vk::BufferCreateInfo uboBufferInfo;
+  uboBufferInfo.size = sizeof(ubo_);
+  uboBufferInfo.usage = vk::BufferUsageFlagBits::eUniformBuffer | vk::BufferUsageFlagBits::eTransferDst;
+  uboBufferInfo.sharingMode = vk::SharingMode::eExclusive;
+
+  uboBuffer_ = allocator_.createBuffer(uboBufferInfo, allocationInfo);
+
+  // Update UBO descriptor.
+  vk::DescriptorBufferInfo bufferInfo;
+  bufferInfo.buffer = uboBuffer_;
+  bufferInfo.offset = 0;
+  bufferInfo.range = sizeof(ubo_);
+
+  vk::WriteDescriptorSet descriptorWrite;
+  descriptorWrite.dstSet = pathTracingDescSets_[0];
+  descriptorWrite.dstBinding = 1;
+  descriptorWrite.dstArrayElement = 0;
+  descriptorWrite.descriptorType = vk::DescriptorType::eUniformBuffer;
+  descriptorWrite.descriptorCount = 1;
+  descriptorWrite.pBufferInfo = &bufferInfo;
+
+  logicalDevice_.updateDescriptorSets(descriptorWrite);
+}
+
+void RendererPT::updateUBOBuffer() {
+  uboBuffer_.writeToBuffer(&ubo_, sizeof(ubo_));
+}
+
+void RendererPT::recordCommandBuffers() {
+  // Destroy old command buffers.
+  for (const auto& cmdBuffer : mainCmdBuffers_) {
+    cmdBuffer.reset();
+  }
+
+  for (size_t i = 0; i < mainCmdBuffers_.size(); i++) {
+    vk::CommandBufferBeginInfo beginInfo = {};
+    beginInfo.flags = vk::CommandBufferUsageFlagBits::eSimultaneousUse;
+
+    mainCmdBuffers_[i].begin(beginInfo);
+
+    // Compute shader.
+    mainCmdBuffers_[i].bindPipeline(vk::PipelineBindPoint::eCompute, pathTracingPipeline_);
+    mainCmdBuffers_[i].bindDescriptorSets(
+      vk::PipelineBindPoint::eCompute, pathTracingPipelineLayoutData_.layout, 0,
+      std::vector<vk::DescriptorSet>(pathTracingDescSets_.begin(), pathTracingDescSets_.end()));
+    mainCmdBuffers_[i].dispatch(static_cast<uint32_t>(std::ceil(swapchainImageExtent_.width / float(32))),
+                                static_cast<uint32_t>(std::ceil(swapchainImageExtent_.height / float(32))), 1);
+
+    vk::ImageMemoryBarrier imageMemoryBarrier;
+    imageMemoryBarrier.srcAccessMask = vk::AccessFlagBits::eShaderWrite;
+    imageMemoryBarrier.srcAccessMask = vk::AccessFlagBits::eShaderRead;
+    imageMemoryBarrier.oldLayout = vk::ImageLayout::eGeneral;
+    imageMemoryBarrier.newLayout = vk::ImageLayout::eGeneral;
+    imageMemoryBarrier.image = accumulationTexture_.image;
+    imageMemoryBarrier.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+    imageMemoryBarrier.subresourceRange.baseArrayLayer = 0u;
+    imageMemoryBarrier.subresourceRange.layerCount = 1u;
+    imageMemoryBarrier.subresourceRange.baseMipLevel = 0u;
+    imageMemoryBarrier.subresourceRange.levelCount = 1u;
+
+    mainCmdBuffers_[i].pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader,
+                                       vk::PipelineStageFlagBits::eFragmentShader, {}, {}, {}, imageMemoryBarrier);
+
+    vk::RenderPassBeginInfo renderPassInfo = {};
+    renderPassInfo.renderPass = texViewerRenderPass_;
+    renderPassInfo.framebuffer = framebuffers_[i];
+    renderPassInfo.renderArea.extent = swapchainImageExtent_;
+
+    vk::ClearValue clearValue;
+    clearValue.color.setFloat32({0.0, 0.0, 0.0, 1.0});
+    renderPassInfo.clearValueCount = 1;
+    renderPassInfo.pClearValues = &clearValue;
+
+    mainCmdBuffers_[i].beginRenderPass(renderPassInfo, vk::SubpassContents::eInline);
+    mainCmdBuffers_[i].bindPipeline(vk::PipelineBindPoint::eGraphics, texViewerPipeline_);
+    mainCmdBuffers_[i].bindDescriptorSets(
+      vk::PipelineBindPoint::eGraphics, texViewerPipelineLayoutData_.layout, 0,
+      std::vector<vk::DescriptorSet>(texViewerDescSets_.begin(), texViewerDescSets_.end()));
+
+    mainCmdBuffers_[i].draw(3);
+    mainCmdBuffers_[i].endRenderPass();
+    mainCmdBuffers_[i].end();
+  }
+}
+
+void RendererPT::preDraw() {
+  updateUBOBuffer();
+}
+
+void RendererPT::postDraw() {
+  ubo_.sampleCount++;
 }

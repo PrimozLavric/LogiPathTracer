@@ -361,6 +361,8 @@ void RendererCore::drawFrame() {
 
     static const vk::PipelineStageFlags wait_stages{vk::PipelineStageFlagBits::eColorAttachmentOutput};
 
+    preDraw();
+
     vk::SubmitInfo submit_info;
     submit_info.pWaitDstStageMask = &wait_stages;
     submit_info.pWaitSemaphores = &static_cast<const vk::Semaphore&>(swapchainImgAvailableSemaphore_);
@@ -376,9 +378,17 @@ void RendererCore::drawFrame() {
     // Present image.
     presentQueue_.presentKHR(vk::PresentInfoKHR(1, &static_cast<const vk::Semaphore&>(renderFinishedSemaphore_), 1,
                                                 &static_cast<const vk::SwapchainKHR&>(swapchain_), &imageIndex));
+
+    postDraw();
+
     currentFrame_ = (currentFrame_ + 1) % swapchainImages_.size();
   } catch (const vk::OutOfDateKHRError&) {
     logicalDevice_.waitIdle();
     recreateSwapChain();
+    drawFrame();
   }
 }
+
+void RendererCore::preDraw() {}
+
+void RendererCore::postDraw() {}

@@ -17,6 +17,7 @@ class RendererPT : public RendererCore {
  public:
   RendererPT(const cppglfw::Window& window, const RendererConfiguration& configuration);
 
+ protected:
   void createTexViewerRenderPass();
 
   void createFrameBuffers();
@@ -25,18 +26,29 @@ class RendererPT : public RendererCore {
 
   void createPathTracingPipeline();
 
-  void recordCommandBuffers();
-
   void initializeAccumulationTexture();
 
   void initializeDescriptorSets();
 
   void updateAccumulationTexDescriptorSet();
 
- protected:
+  void initializeUBOBuffer();
+
+  void updateUBOBuffer();
+
+  void recordCommandBuffers();
+
   void onSwapChainRecreate() override;
 
+  void preDraw() override;
+
+  void postDraw() override;
+
  private:
+  struct PathTracerUBO {
+    uint32_t sampleCount = 0;
+  };
+
   logi::DescriptorPool descriptorPool_;
   logi::MemoryAllocator allocator_;
 
@@ -53,6 +65,9 @@ class RendererPT : public RendererCore {
   std::vector<logi::DescriptorSet> pathTracingDescSets_;
 
   Texture accumulationTexture_;
+
+  PathTracerUBO ubo_;
+  logi::VMABuffer uboBuffer_;
 };
 
 #endif // LOGIPATHTRACER_RENDERERPT_H

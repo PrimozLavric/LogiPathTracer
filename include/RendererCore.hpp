@@ -73,6 +73,10 @@ class RendererCore {
 
   void initializeCommandBuffers();
 
+  virtual void preDraw();
+
+  virtual void postDraw();
+
  protected:
   cppglfw::Window window_;
   logi::VulkanInstance instance_;
