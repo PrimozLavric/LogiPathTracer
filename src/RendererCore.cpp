@@ -80,7 +80,7 @@ void RendererCore::selectPhysicalDevice() {
     if (type == vk::PhysicalDeviceType::eDiscreteGpu) {
       // If discrete gpu is found select it immediately.
       physicalDevice_ = device;
-      return;
+      break;
     } else if (type == vk::PhysicalDeviceType::eIntegratedGpu || type == vk::PhysicalDeviceType::eVirtualGpu) {
       physicalDevice_ = device;
     }
@@ -346,6 +346,28 @@ void RendererCore::initializeCommandBuffers() {
   graphicsFamilyCmdPool_ = graphicsFamily_.createCommandPool(vk::CommandPoolCreateFlagBits::eResetCommandBuffer);
   mainCmdBuffers_ =
     graphicsFamilyCmdPool_.allocateCommandBuffers(vk::CommandBufferLevel::ePrimary, swapchainImages_.size());
+}
+
+void RendererCore::blockingBufferCopy(const logi::Buffer& srcBuffer, const logi::Buffer& dstBuffer, vk::DeviceSize size,
+                                      vk::DeviceSize srcOffset, vk::DeviceSize dstOffset) {
+  logi::CommandBuffer cmdBuffer = graphicsFamilyCmdPool_.allocateCommandBuffer(vk::CommandBufferLevel::ePrimary);
+
+  cmdBuffer.begin({vk::CommandBufferUsageFlagBits::eOneTimeSubmit});
+  vk::BufferCopy copyRegion;
+  copyRegion.size = size;
+  copyRegion.srcOffset = srcOffset;
+  copyRegion.dstOffset = dstOffset;
+
+  cmdBuffer.copyBuffer(srcBuffer, dstBuffer, copyRegion);
+  cmdBuffer.end();
+
+  vk::SubmitInfo submit_info;
+  submit_info.commandBufferCount = 1;
+  submit_info.pCommandBuffers = &static_cast<const vk::CommandBuffer&>(cmdBuffer);
+  graphicsQueue_.submit({submit_info}, inFlightFence_);
+  graphicsQueue_.waitIdle();
+
+  cmdBuffer.destroy();
 }
 
 void RendererCore::drawFrame() {

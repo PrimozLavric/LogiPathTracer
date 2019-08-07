@@ -27,6 +27,8 @@ RendererPT::RendererPT(const cppglfw::Window& window, const RendererConfiguratio
   recordCommandBuffers();
 }
 
+void RendererPT::loadScene(const lsg::Ref<lsg::Scene>& scene) {}
+
 void RendererPT::createTexViewerRenderPass() {
   vk::AttachmentDescription colorAttachment;
 

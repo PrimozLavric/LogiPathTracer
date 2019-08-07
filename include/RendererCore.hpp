@@ -73,6 +73,9 @@ class RendererCore {
 
   void initializeCommandBuffers();
 
+  void blockingBufferCopy(const logi::Buffer& srcBuffer, const logi::Buffer& dstBuffer, vk::DeviceSize size,
+                          vk::DeviceSize srcOffset = 0u, vk::DeviceSize dstOffset = 0u);
+
   virtual void preDraw();
 
   virtual void postDraw();

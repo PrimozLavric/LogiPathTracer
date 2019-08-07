@@ -5,6 +5,7 @@
 #ifndef LOGIPATHTRACER_RENDERERPT_H
 #define LOGIPATHTRACER_RENDERERPT_H
 
+#include <lsg/lsg.h>
 #include "RendererCore.hpp"
 
 struct Texture {
@@ -16,6 +17,8 @@ struct Texture {
 class RendererPT : public RendererCore {
  public:
   RendererPT(const cppglfw::Window& window, const RendererConfiguration& configuration);
+
+  void loadScene(const lsg::Ref<lsg::Scene>& scene);
 
  protected:
   void createTexViewerRenderPass();
