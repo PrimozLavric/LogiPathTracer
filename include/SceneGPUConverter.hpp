@@ -18,23 +18,52 @@ struct GPUObjectData {
   glm::mat4 worldMatrix;
   glm::mat4 worldMatrixInverse;
   glm::vec4 baseColorFactor;
-  glm::vec3 emissionFactor;
-  float metallicFactor;
-  float roughnessFactor;
-  uint32_t bvhOffset;
-  uint32_t verticesOffset;
+  alignas(16) glm::vec3 emissionFactor;
+  alignas(4) float metallicFactor;
+  alignas(4) float roughnessFactor;
+  alignas(4) uint32_t bvhOffset;
+  alignas(8) uint32_t verticesOffset;
 };
 
 struct GPUVertex {
   explicit GPUVertex(const glm::vec3& position = {}, const glm::vec3& normal = {});
 
-  glm::vec3 position;
-  glm::vec3 normal;
+  alignas(16) glm::vec3 position;
+  alignas(16) glm::vec3 normal;
+};
+
+struct GPUBVHNode {
+  GPUBVHNode(const glm::vec3& min, const glm::vec3& max, bool isLeaf, const glm::uvec2& indices);
+
+  alignas(16) glm::vec3 min;
+  alignas(16) glm::vec3 max;
+  alignas(4) uint32_t isLeaf;
+  alignas(8) glm::uvec2 indices;
 };
 
 class SceneGPUConverter {
  public:
-  SceneGPUConverter() = default;
+  SceneGPUConverter() {
+    std::cout << "GPUObjectData (" << sizeof(GPUObjectData) << "):" << std::endl;
+    std::cout << offsetof(GPUObjectData, worldMatrix) << std::endl;
+    std::cout << offsetof(GPUObjectData, worldMatrixInverse) << std::endl;
+    std::cout << offsetof(GPUObjectData, baseColorFactor) << std::endl;
+    std::cout << offsetof(GPUObjectData, emissionFactor) << std::endl;
+    std::cout << offsetof(GPUObjectData, metallicFactor) << std::endl;
+    std::cout << offsetof(GPUObjectData, roughnessFactor) << std::endl;
+    std::cout << offsetof(GPUObjectData, bvhOffset) << std::endl;
+    std::cout << offsetof(GPUObjectData, verticesOffset) << std::endl << std::endl;
+
+    std::cout << "GPUVertex (" << sizeof(GPUVertex) << "):" << std::endl;
+    std::cout << offsetof(GPUVertex, position) << std::endl;
+    std::cout << offsetof(GPUVertex, normal) << std::endl << std::endl;
+
+    std::cout << "GPUBVHNode (" << sizeof(GPUBVHNode) << "):" << std::endl;
+    std::cout << offsetof(GPUBVHNode, min) << std::endl;
+    std::cout << offsetof(GPUBVHNode, max) << std::endl;
+    std::cout << offsetof(GPUBVHNode, isLeaf) << std::endl;
+    std::cout << offsetof(GPUBVHNode, indices) << std::endl;
+  }
 
   void loadScene(const lsg::Ref<lsg::Scene>& scene);
 
@@ -46,19 +75,19 @@ class SceneGPUConverter {
 
   const std::vector<GPUObjectData>& getObjectData() const;
 
-  const std::vector<lsg::BVH<float>::Node>& getObjectBvhNodes() const;
+  const std::vector<GPUBVHNode>& getObjectBvhNodes() const;
 
   const std::vector<GPUVertex>& getVertices() const;
 
-  const std::vector<lsg::BVH<float>::Node>& getMeshBvhNodes() const;
+  const std::vector<GPUBVHNode>& getMeshBvhNodes() const;
 
  private:
   lsg::Ref<lsg::Scene> scene_;
   std::vector<lsg::Ref<lsg::Object>> cameras_;
   std::vector<GPUObjectData> objectData_;
-  std::vector<lsg::BVH<float>::Node> objectBVHNodes_;
+  std::vector<GPUBVHNode> objectBVHNodes_;
   std::vector<GPUVertex> vertices_;
-  std::vector<lsg::BVH<float>::Node> meshBVHNodes_;
+  std::vector<GPUBVHNode> meshBVHNodes_;
 };
 
 #endif // LOGIPATHTRACER_SCENEGPUCONVERTER_HPP

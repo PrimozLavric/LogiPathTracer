@@ -7,6 +7,7 @@
 
 #include <lsg/lsg.h>
 #include "RendererCore.hpp"
+#include "SceneGPUConverter.hpp"
 
 struct Texture {
   logi::VMAImage image;
@@ -19,6 +20,8 @@ class RendererPT : public RendererCore {
   RendererPT(const cppglfw::Window& window, const RendererConfiguration& configuration);
 
   void loadScene(const lsg::Ref<lsg::Scene>& scene);
+
+  void drawFrame() override;
 
  protected:
   void createTexViewerRenderPass();
@@ -39,6 +42,8 @@ class RendererPT : public RendererCore {
 
   void updateUBOBuffer();
 
+  void initializeAndBindSceneBuffer();
+
   void recordCommandBuffers();
 
   void onSwapChainRecreate() override;
@@ -48,9 +53,15 @@ class RendererPT : public RendererCore {
   void postDraw() override;
 
  private:
+  struct CameraGPU {
+    glm::mat4 worldMatrix;
+    float fovY;
+  } __attribute__((aligned(16)));
+
   struct PathTracerUBO {
+    CameraGPU camera;
     uint32_t sampleCount = 0;
-  };
+  } __attribute__((aligned(16)));
 
   logi::DescriptorPool descriptorPool_;
   logi::MemoryAllocator allocator_;
@@ -71,6 +82,11 @@ class RendererPT : public RendererCore {
 
   PathTracerUBO ubo_;
   logi::VMABuffer uboBuffer_;
+
+  std::atomic<bool> sceneLoaded_ = false;
+  lsg::Ref<lsg::Transform> selectedCameraTransform_;
+  SceneGPUConverter sceneConverter_;
+  logi::VMABuffer sceneBuffer_;
 };
 
 #endif // LOGIPATHTRACER_RENDERERPT_H

@@ -364,7 +364,7 @@ void RendererCore::blockingBufferCopy(const logi::Buffer& srcBuffer, const logi:
   vk::SubmitInfo submit_info;
   submit_info.commandBufferCount = 1;
   submit_info.pCommandBuffers = &static_cast<const vk::CommandBuffer&>(cmdBuffer);
-  graphicsQueue_.submit({submit_info}, inFlightFence_);
+  graphicsQueue_.submit({submit_info});
   graphicsQueue_.waitIdle();
 
   cmdBuffer.destroy();

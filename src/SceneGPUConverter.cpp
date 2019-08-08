@@ -14,6 +14,9 @@ GPUObjectData::GPUObjectData(const glm::mat4& world_matrix, const glm::mat4& wor
 
 GPUVertex::GPUVertex(const glm::vec3& position, const glm::vec3& normal) : position(position), normal(normal) {}
 
+GPUBVHNode::GPUBVHNode(const glm::vec3& min, const glm::vec3& max, bool isLeaf, const glm::uvec2& indices)
+  : min(min), max(max), isLeaf(isLeaf), indices(indices) {}
+
 void SceneGPUConverter::loadScene(const lsg::Ref<lsg::Scene>& scene) {
   clear();
   scene_ = scene;
@@ -31,13 +34,13 @@ void SceneGPUConverter::loadScene(const lsg::Ref<lsg::Scene>& scene) {
       }
 
       // Handle cameras.
-      if (auto camera = object->getComponent<lsg::Camera>()) {
+      if (auto camera = object->getComponent<lsg::PerspectiveCamera>()) {
         cameras_.emplace_back(object);
       }
 
       // Handle geometry.
       if (auto mesh = object->getComponent<lsg::Mesh>()) {
-        std::cout << "Building BVH for object " << object->name() << "..." << std::flush;
+        std::cout << "Building BVH for object " << object->name() << "..." << std::endl;
 
         for (const auto& submesh : mesh->subMeshes()) {
           lsg::Ref<lsg::MetallicRoughnessMaterial> material =
@@ -53,7 +56,7 @@ void SceneGPUConverter::loadScene(const lsg::Ref<lsg::Scene>& scene) {
           unorderedObjectData.emplace_back();
           GPUObjectData& objectData = unorderedObjectData.back();
           objectData.worldMatrix = worldMatrix;
-          objectData.worldMatrix = glm::inverse(objectData.worldMatrix);
+          objectData.worldMatrixInverse = glm::inverse(objectData.worldMatrix);
           objectData.baseColorFactor = material->baseColorFactor();
           objectData.emissionFactor = material->emissiveFactor();
           objectData.metallicFactor = material->metallicFactor();
@@ -61,13 +64,18 @@ void SceneGPUConverter::loadScene(const lsg::Ref<lsg::Scene>& scene) {
           objectData.bvhOffset = meshBVHNodes_.size();
           objectData.verticesOffset = vertices_.size();
 
+          std::cout << "VTX offset: " << vertices_.size() << std::endl;
+
           auto positionAccessor = submesh->geometry()->getTrianglePositionAccessor();
           auto normalAccessor = submesh->geometry()->getTriangleNormalAccessor();
 
           // Build triangles BVH nodes.
           lsg::bvh::SplitBVHBuilder<float> builder;
           auto bvh = builder.process(submesh->geometry()->getTrianglePositionAccessor());
-          meshBVHNodes_.insert(meshBVHNodes_.end(), bvh->getNodes().begin(), bvh->getNodes().end());
+          for (const auto& node : bvh->getNodes()) {
+            meshBVHNodes_.emplace_back(node.bounds.min(), node.bounds.max(), node.is_leaf, node.child_indices);
+          }
+          std::cout << "Vtx count: " << bvh->getPrimitiveIndices().size() * 3 << std::endl;
 
           // Convert vertices into GPU compatible format (interleave).
           for (uint32_t idx : bvh->getPrimitiveIndices()) {
@@ -79,7 +87,7 @@ void SceneGPUConverter::loadScene(const lsg::Ref<lsg::Scene>& scene) {
             vertices_.emplace_back(posTri.c(), normalTri.c());
           }
 
-          objectAABBs.emplace_back(bvh->getBounds());
+          objectAABBs.emplace_back(bvh->getBounds().transform(worldMatrix));
         }
         std::cout << " Finished." << std::endl;
       }
@@ -93,7 +101,9 @@ void SceneGPUConverter::loadScene(const lsg::Ref<lsg::Scene>& scene) {
   // Build objects BVH nodes.
   lsg::bvh::BVHBuilder<float> builder;
   auto bvh = builder.process(objectAABBs);
-  objectBVHNodes_ = bvh->getNodes();
+  for (const auto& node : bvh->getNodes()) {
+    objectBVHNodes_.emplace_back(node.bounds.min(), node.bounds.max(), node.is_leaf, node.child_indices);
+  }
 
   for (uint32_t idx : bvh->getPrimitiveIndices()) {
     objectData_.emplace_back(unorderedObjectData[idx]);
@@ -123,7 +133,7 @@ const std::vector<GPUObjectData>& SceneGPUConverter::getObjectData() const {
   return objectData_;
 }
 
-const std::vector<lsg::BVH<float>::Node>& SceneGPUConverter::getObjectBvhNodes() const {
+const std::vector<GPUBVHNode>& SceneGPUConverter::getObjectBvhNodes() const {
   return objectBVHNodes_;
 }
 
@@ -131,6 +141,6 @@ const std::vector<GPUVertex>& SceneGPUConverter::getVertices() const {
   return vertices_;
 }
 
-const std::vector<lsg::BVH<float>::Node>& SceneGPUConverter::getMeshBvhNodes() const {
+const std::vector<GPUBVHNode>& SceneGPUConverter::getMeshBvhNodes() const {
   return meshBVHNodes_;
 }

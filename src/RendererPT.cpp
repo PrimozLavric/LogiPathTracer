@@ -3,6 +3,7 @@
 //
 
 #include "RendererPT.h"
+#include <RendererPT.h>
 #include <chrono>
 #include <cmath>
 
@@ -24,10 +25,29 @@ RendererPT::RendererPT(const cppglfw::Window& window, const RendererConfiguratio
   initializeDescriptorSets();
   updateAccumulationTexDescriptorSet();
   initializeUBOBuffer();
-  recordCommandBuffers();
+  // recordCommandBuffers();
 }
 
-void RendererPT::loadScene(const lsg::Ref<lsg::Scene>& scene) {}
+void RendererPT::loadScene(const lsg::Ref<lsg::Scene>& scene) {
+  sceneLoaded_ = false;
+
+  sceneConverter_.loadScene(scene);
+  const std::vector<lsg::Ref<lsg::Object>>& cameras = sceneConverter_.getCameras();
+  if (cameras.empty()) {
+    std::cout << "Loaded scene without cameras." << std::endl;
+    sceneConverter_.clear();
+  }
+
+  selectedCameraTransform_ = sceneConverter_.getCameras()[0]->getComponent<lsg::Transform>();
+
+  auto cameraData = cameras[0]->getComponent<lsg::PerspectiveCamera>();
+  ubo_.camera.fovY = cameraData->fov();
+  ubo_.camera.worldMatrix = selectedCameraTransform_->worldMatrix();
+  ubo_.sampleCount = 0;
+
+  initializeAndBindSceneBuffer();
+  sceneLoaded_ = true;
+}
 
 void RendererPT::createTexViewerRenderPass() {
   vk::AttachmentDescription colorAttachment;
@@ -290,13 +310,13 @@ void RendererPT::initializeDescriptorSets() {
   static const size_t numPoolSets = 10;
   static const std::vector<vk::DescriptorPoolSize> poolSizes = {
     //{vk::DescriptorType::eSampler, 0},
-    {vk::DescriptorType::eCombinedImageSampler, 2},
+    {vk::DescriptorType::eCombinedImageSampler, 1},
     //{vk::DescriptorType::eSampledImage, 0},
     {vk::DescriptorType::eStorageImage, 1},
     //{vk::DescriptorType::eUniformTexelBuffer, 0},
     //{vk::DescriptorType::eStorageTexelBuffer, 0},
     {vk::DescriptorType::eUniformBuffer, 1},
-    //{vk::DescriptorType::eStorageBuffer, 0},
+    {vk::DescriptorType::eStorageBuffer, 4},
     //{vk::DescriptorType::eUniformBufferDynamic, 0},
     //{vk::DescriptorType::eStorageBufferDynamic, 0},
     //{vk::DescriptorType::eInputAttachment, 0},
@@ -383,6 +403,117 @@ void RendererPT::updateUBOBuffer() {
   uboBuffer_.writeToBuffer(&ubo_, sizeof(ubo_));
 }
 
+void RendererPT::initializeAndBindSceneBuffer() {
+  // Compute data size.
+  vk::DeviceSize objectDataSize = sceneConverter_.getObjectData().size() * sizeof(GPUObjectData);
+  vk::DeviceSize objectBVHNodesOffset = objectDataSize + (256 - objectDataSize % 256);
+  vk::DeviceSize objectBVHNodesSize = sceneConverter_.getObjectBvhNodes().size() * sizeof(GPUBVHNode);
+  vk::DeviceSize verticesOffset =
+    (objectBVHNodesOffset + objectBVHNodesSize) + (256 - (objectBVHNodesOffset + objectBVHNodesSize) % 256);
+  vk::DeviceSize verticesSize = sceneConverter_.getVertices().size() * sizeof(GPUVertex);
+  vk::DeviceSize meshBVHNodesOffset = (verticesOffset + verticesSize) + (256 - (verticesOffset + verticesSize) % 256);
+  vk::DeviceSize meshBVHNodesSize = sceneConverter_.getMeshBvhNodes().size() * sizeof(GPUBVHNode);
+  vk::DeviceSize bufferSize = meshBVHNodesOffset + meshBVHNodesSize;
+
+  // Allocate staging buffer.
+  VmaAllocationCreateInfo stagingBufferAllocationInfo = {};
+  stagingBufferAllocationInfo.usage = VmaMemoryUsage::VMA_MEMORY_USAGE_CPU_TO_GPU;
+
+  vk::BufferCreateInfo stagingBufferInfo;
+  stagingBufferInfo.size = bufferSize;
+  stagingBufferInfo.usage = vk::BufferUsageFlagBits::eTransferSrc;
+  stagingBufferInfo.sharingMode = vk::SharingMode::eExclusive;
+
+  logi::VMABuffer stagingBuffer = allocator_.createBuffer(stagingBufferInfo, stagingBufferAllocationInfo);
+
+  // Fill staging buffer with scene data.
+  stagingBuffer.writeToBuffer(sceneConverter_.getObjectData().data(), objectDataSize);
+  stagingBuffer.writeToBuffer(sceneConverter_.getObjectBvhNodes().data(), objectBVHNodesSize, objectBVHNodesOffset);
+  stagingBuffer.writeToBuffer(sceneConverter_.getVertices().data(), verticesSize, verticesOffset);
+  stagingBuffer.writeToBuffer(sceneConverter_.getMeshBvhNodes().data(), meshBVHNodesSize, meshBVHNodesOffset);
+
+  // Destroy existing scene buffer.
+  if (sceneBuffer_) {
+    sceneBuffer_.destroy();
+  }
+
+  // Allocate scene buffer on GPU
+  VmaAllocationCreateInfo sceneBufferAllocationInfo = {};
+  sceneBufferAllocationInfo.usage = VmaMemoryUsage::VMA_MEMORY_USAGE_GPU_ONLY;
+
+  vk::BufferCreateInfo sceneBufferInfo;
+  sceneBufferInfo.size = bufferSize;
+  sceneBufferInfo.usage = vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eStorageBuffer;
+  sceneBufferInfo.sharingMode = vk::SharingMode::eExclusive;
+
+  sceneBuffer_ = allocator_.createBuffer(sceneBufferInfo, sceneBufferAllocationInfo);
+
+  // Copy scene data from staging buffer to scene buffer.
+  blockingBufferCopy(stagingBuffer, sceneBuffer_, bufferSize);
+
+  // Destroy staging buffer.
+  stagingBuffer.destroy();
+
+  // Update descriptor sets.
+  std::array<vk::WriteDescriptorSet, 4> descriptorWrites;
+
+  // Object data binding
+  vk::DescriptorBufferInfo objectDataBufferInfo;
+  objectDataBufferInfo.buffer = sceneBuffer_;
+  objectDataBufferInfo.offset = 0;
+  objectDataBufferInfo.range = objectDataSize;
+
+  descriptorWrites[0].dstSet = pathTracingDescSets_[0];
+  descriptorWrites[0].dstBinding = 2;
+  descriptorWrites[0].dstArrayElement = 0;
+  descriptorWrites[0].descriptorType = vk::DescriptorType::eStorageBuffer;
+  descriptorWrites[0].descriptorCount = 1;
+  descriptorWrites[0].pBufferInfo = &objectDataBufferInfo;
+
+  // Object BVH nodes binding
+  vk::DescriptorBufferInfo objectBVHNodesInfo;
+  objectBVHNodesInfo.buffer = sceneBuffer_;
+  objectBVHNodesInfo.offset = objectBVHNodesOffset;
+  objectBVHNodesInfo.range = objectBVHNodesSize;
+
+  descriptorWrites[1].dstSet = pathTracingDescSets_[0];
+  descriptorWrites[1].dstBinding = 3;
+  descriptorWrites[1].dstArrayElement = 0;
+  descriptorWrites[1].descriptorType = vk::DescriptorType::eStorageBuffer;
+  descriptorWrites[1].descriptorCount = 1;
+  descriptorWrites[1].pBufferInfo = &objectBVHNodesInfo;
+
+  // Vertices binding
+  vk::DescriptorBufferInfo verticesInfo;
+  verticesInfo.buffer = sceneBuffer_;
+  verticesInfo.offset = verticesOffset;
+  verticesInfo.range = verticesSize;
+
+  descriptorWrites[2].dstSet = pathTracingDescSets_[0];
+  descriptorWrites[2].dstBinding = 4;
+  descriptorWrites[2].dstArrayElement = 0;
+  descriptorWrites[2].descriptorType = vk::DescriptorType::eStorageBuffer;
+  descriptorWrites[2].descriptorCount = 1;
+  descriptorWrites[2].pBufferInfo = &verticesInfo;
+
+  // Mesh BVH nodes binding
+  vk::DescriptorBufferInfo meshBVHNodesInfo;
+  meshBVHNodesInfo.buffer = sceneBuffer_;
+  meshBVHNodesInfo.offset = meshBVHNodesOffset;
+  meshBVHNodesInfo.range = meshBVHNodesSize;
+
+  descriptorWrites[3].dstSet = pathTracingDescSets_[0];
+  descriptorWrites[3].dstBinding = 5;
+  descriptorWrites[3].dstArrayElement = 0;
+  descriptorWrites[3].descriptorType = vk::DescriptorType::eStorageBuffer;
+  descriptorWrites[3].descriptorCount = 1;
+  descriptorWrites[3].pBufferInfo = &meshBVHNodesInfo;
+
+  logicalDevice_.updateDescriptorSets(descriptorWrites);
+  // We need to rerecord command buffers once we update descriptor sets.
+  recordCommandBuffers();
+}
+
 void RendererPT::recordCommandBuffers() {
   // Destroy old command buffers.
   for (const auto& cmdBuffer : mainCmdBuffers_) {
@@ -441,9 +572,19 @@ void RendererPT::recordCommandBuffers() {
 }
 
 void RendererPT::preDraw() {
+  if (selectedCameraTransform_->isWorldMatrixDirty()) {
+    ubo_.camera.worldMatrix = selectedCameraTransform_->worldMatrix();
+    ubo_.sampleCount = 0;
+  }
+
   updateUBOBuffer();
 }
 
 void RendererPT::postDraw() {
   ubo_.sampleCount++;
+}
+void RendererPT::drawFrame() {
+  if (sceneLoaded_) {
+    RendererCore::drawFrame();
+  }
 }

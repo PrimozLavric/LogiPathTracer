@@ -44,7 +44,7 @@ class RendererCore {
  public:
   explicit RendererCore(cppglfw::Window window, const RendererConfiguration& configuration);
 
-  void drawFrame();
+  virtual void drawFrame();
 
  protected:
   void createInstance(const std::vector<const char*>& extensions, const std::vector<const char*>& validationLayers);
