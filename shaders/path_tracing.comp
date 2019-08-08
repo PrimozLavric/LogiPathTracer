@@ -4,8 +4,17 @@
 #define WORKGROUP_SIZE 32
 layout (local_size_x = WORKGROUP_SIZE, local_size_y = WORKGROUP_SIZE, local_size_z = 1) in;
 
+#define PI 3.1415926535897932384626433832795
 #define INFINITY 3.4E+38
-#define INTERSECTION_STACK_SIZE 64
+#define INTERSECTION_STACK_SIZE 10
+#define MAX_TRACE_DEPTH 10
+
+#define RUSSIAN_ROULETTE_BOUNCES 3
+
+// Interaction type
+const uint kDiff = 0x00000001u;
+const uint kSpec = 0x00000002u;
+const uint kLight = 0x00000004u;
 
 struct Camera {
     mat4 worldMatrix;
@@ -132,7 +141,6 @@ float rayAABBIntersect(Ray ray, vec3 minCorner, vec3 maxCorner) {
     return INFINITY;
 }
 
-
 float rayTriangleIntersect(Ray ray, vec3 v0, vec3 v1, vec3 v2) {
     vec3 edge1 = v1 - v0;
     vec3 edge2 = v2 - v0;
@@ -183,7 +191,7 @@ void objectIntersect(Ray ray, uint objectIndex, inout Intersection intersection)
 
     // Transform ray to object space
     Ray rayObjSpace;
-    rayObjSpace.origin = vec3(objects[objectIndex].worldMatrixInverse * vec4(ray.origin, 1));
+    rayObjSpace.origin = vec3(objects[objectIndex].worldMatrixInverse * vec4(ray.origin, 1.0));
     rayObjSpace.direction = mat3(objects[objectIndex].worldMatrixInverse) * ray.direction;
 
     // Initialize stack.
@@ -256,6 +264,95 @@ Intersection sceneIntersect(Ray ray) {
     return intersection;
 }
 
+
+uint determineInteractionType(vec3 emissionFactor, float roughnessFactor, float metallicFactor) {
+    float avgEmissionFactor = (emissionFactor.x + emissionFactor.y + emissionFactor.z) / 3.0f;
+    float maxRand = roughnessFactor + metallicFactor + avgEmissionFactor;
+    if (maxRand == 0.0f) {
+        return kDiff;
+    }
+
+    float r = rand() * maxRand;
+
+    if (r < roughnessFactor) {
+        return kDiff;
+    } else if (r < roughnessFactor + metallicFactor) {
+        return kSpec;
+    } else {
+        return kLight;
+    }
+}
+
+
+vec3 traceRay(Ray ray) {
+
+    vec3 accColor = vec3(0.0, 0.0, 0.0);
+    vec3 mask = vec3(1.0, 1.0, 1.0);
+
+    for (uint bounce = 0; bounce < MAX_TRACE_DEPTH; bounce++) {
+        Intersection isect = sceneIntersect(ray);
+
+        // Missed.
+        if (isect.distance == INFINITY) {
+            break;
+        }
+
+        vec4 baseColorFactor = objects[isect.objectIndex].baseColorFactor;
+        vec3 emissionFactor = objects[isect.objectIndex].emissionFactor;
+        float roughnessFactor = objects[isect.objectIndex].roughnessFactor;
+        float metallicFactor = objects[isect.objectIndex].metallicFactor;
+
+        uint interaction = determineInteractionType(emissionFactor, roughnessFactor, metallicFactor);
+
+        // Compute normal
+        if (interaction == kLight) {
+            accColor = mask * emissionFactor * 10.0f;
+        } else {
+            Ray rayObjSpace;
+            rayObjSpace.origin = vec3(objects[isect.objectIndex].worldMatrixInverse * vec4(ray.origin, 1));
+            rayObjSpace.direction = mat3(objects[isect.objectIndex].worldMatrixInverse) * ray.direction;
+
+            vec3 isectPositionWorld = ray.origin + isect.distance * ray.direction;
+            vec3 bary = barycentricCoord(rayObjSpace.origin + isect.distance * rayObjSpace.direction, vertices[isect.primitiveIndex].position, vertices[isect.primitiveIndex + 1].position, vertices[isect.primitiveIndex + 2].position);
+            vec3 normal = normalize(mat3(objects[isect.objectIndex].worldMatrix) * (bary.x * vertices[isect.primitiveIndex].normal + bary.y * vertices[isect.primitiveIndex + 1].normal + bary.z * vertices[isect.primitiveIndex + 2].normal));
+
+            vec3 ffNormal = (dot(normal, ray.direction) < 0.0f) ? normal : normal * -1.0f;// front facing normal
+
+            if (interaction == kDiff) {
+                float r1 = 2.0f * PI * rand();// pick random number on unit circle (radius = 1, circumference = 2*Pi) for azimuth
+                float r2 = rand();// pick random number for elevation
+                float r2s = sqrt(r2);
+
+                vec3 u = normalize(cross((abs(ffNormal.x) > 0.1f ? vec3(0.0f, 1.0f, 0.0f) : vec3(1.0f, 0.0f, 0.0f)), ffNormal));
+                vec3 v = cross(ffNormal, u);
+
+                ray.origin = isectPositionWorld + 0.05 * ffNormal;
+                ray.direction = normalize(u * cos(r1) * r2s + v * sin(r1) * r2s + ffNormal * sqrt(1.0f - r2));
+
+                mask *= vec3(baseColorFactor);
+                mask *= dot(ray.direction, ffNormal);
+            } else if (interaction == kSpec) {
+                mask *= vec3(baseColorFactor);
+                ray.origin = isectPositionWorld + 0.05 * ffNormal;
+                ray.direction = reflect(ray.direction, ffNormal);
+            } else {
+                // Unknown interaction.
+                break;
+            }
+        }
+
+        if (length(mask) < 0.5 && bounce > RUSSIAN_ROULETTE_BOUNCES) {
+            float q = max(0.05f, 1.0f - length(mask));
+            if (rand() < q) {
+                break;
+            }
+            mask /= 1.0f - q;
+        }
+    }
+
+    return accColor;
+}
+
 void main() {
     vec2 resolution = imageSize(accumulationImage);
 
@@ -270,12 +367,12 @@ void main() {
     seed = uvec2((ubo.sampleCount, ubo.sampleCount + 1) * gl_GlobalInvocationID.xy);
 
     Ray ray = generateRay(resolution);
-    Intersection intersect = sceneIntersect(ray);
+    //Intersection intersect = sceneIntersect(ray);
 
     // store to the storage buffer:
     if (ubo.sampleCount == 0) {
-        imageStore(accumulationImage, ivec2(gl_GlobalInvocationID.xy), vec4(intersect.objectIndex / 9.0, 0.0, 0.0, 1.0));
+        imageStore(accumulationImage, ivec2(gl_GlobalInvocationID.xy), vec4(traceRay(ray), 1.0));
     } else {
-        imageStore(accumulationImage, ivec2(gl_GlobalInvocationID.xy), vec4(intersect.objectIndex / 9.0, 0.0, 0.0, 1.0));
+        imageStore(accumulationImage, ivec2(gl_GlobalInvocationID.xy), ((imageLoad(accumulationImage, ivec2(gl_GlobalInvocationID.xy)) * ubo.sampleCount) + vec4(traceRay(ray), 1.0)) / (ubo.sampleCount + 1));
     }
 }

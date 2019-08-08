@@ -582,6 +582,7 @@ void RendererPT::preDraw() {
 
 void RendererPT::postDraw() {
   ubo_.sampleCount++;
+  std::cout << "Sample: " << ubo_.sampleCount << std::endl;
 }
 void RendererPT::drawFrame() {
   if (sceneLoaded_) {
