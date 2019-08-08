@@ -270,13 +270,7 @@ void main() {
     seed = uvec2((ubo.sampleCount, ubo.sampleCount + 1) * gl_GlobalInvocationID.xy);
 
     Ray ray = generateRay(resolution);
-    //Intersection intersect = sceneIntersect(ray);
-    Intersection intersect;
-    intersect.distance = INFINITY;
-    for (uint i = 0; i < 10; i++) {
-        objectIntersect(ray, i, intersect);
-    }
-    uint a = objectBVHNodes.length();
+    Intersection intersect = sceneIntersect(ray);
 
     // store to the storage buffer:
     if (ubo.sampleCount == 0) {
