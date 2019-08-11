@@ -56,12 +56,12 @@ class RendererPT : public RendererCore {
   struct CameraGPU {
     glm::mat4 worldMatrix;
     float fovY;
-  } __attribute__((aligned(16)));
+  };
 
   struct PathTracerUBO {
     CameraGPU camera;
     uint32_t sampleCount = 0;
-  } __attribute__((aligned(16)));
+  };
 
   logi::DescriptorPool descriptorPool_;
   logi::MemoryAllocator allocator_;

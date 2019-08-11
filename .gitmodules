@@ -3,7 +3,7 @@
 	url = https://github.com/PrimozLavric/Logi.git
 [submodule "libs/LogiSceneGraph"]
 	path = libs/LogiSceneGraph
-	url = git@github.com:PrimozLavric/LogiSceneGraph.git
+	url = https://github.com/PrimozLavric/LogiSceneGraph.git
 [submodule "libs/CppGLFW"]
 	path = libs/CppGLFW
 	url = https://github.com/LanaBesevic/CppGLFW.git

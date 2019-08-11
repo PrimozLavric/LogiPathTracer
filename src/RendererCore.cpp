@@ -64,7 +64,7 @@ void RendererCore::createInstance(const std::vector<const char*>& extensions,
   vk::DebugReportCallbackCreateInfoEXT debugReportCI;
   debugReportCI.flags =
     vk::DebugReportFlagBitsEXT::eError | vk::DebugReportFlagBitsEXT::eDebug | vk::DebugReportFlagBitsEXT::eWarning;
-  debugReportCI.pfnCallback = debugCallback;
+  debugReportCI.pfnCallback = reinterpret_cast<PFN_vkDebugReportCallbackEXT>(debugCallback);
 
   instance_.createDebugReportCallbackEXT(debugReportCI);
 }
