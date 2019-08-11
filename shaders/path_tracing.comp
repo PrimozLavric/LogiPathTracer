@@ -9,7 +9,7 @@ layout (local_size_x = WORKGROUP_SIZE, local_size_y = WORKGROUP_SIZE, local_size
 #define INTERSECTION_STACK_SIZE 10
 #define MAX_TRACE_DEPTH 10
 
-#define RUSSIAN_ROULETTE_BOUNCES 3
+#define RUSSIAN_ROULETTE_BOUNCES 2
 
 // Interaction type
 const uint kDiff = 0x00000001u;
@@ -302,6 +302,7 @@ vec3 traceRay(Ray ray) {
         float roughnessFactor = objects[isect.objectIndex].roughnessFactor;
         float metallicFactor = objects[isect.objectIndex].metallicFactor;
 
+        // Determine interaction type based on the emission, roughness and metalic factor.
         uint interaction = determineInteractionType(emissionFactor, roughnessFactor, metallicFactor);
 
         // Compute normal
@@ -326,14 +327,14 @@ vec3 traceRay(Ray ray) {
                 vec3 u = normalize(cross((abs(ffNormal.x) > 0.1f ? vec3(0.0f, 1.0f, 0.0f) : vec3(1.0f, 0.0f, 0.0f)), ffNormal));
                 vec3 v = cross(ffNormal, u);
 
-                ray.origin = isectPositionWorld + 0.05 * ffNormal;
+                ray.origin = isectPositionWorld + 0.03 * ffNormal;
                 ray.direction = normalize(u * cos(r1) * r2s + v * sin(r1) * r2s + ffNormal * sqrt(1.0f - r2));
 
                 mask *= vec3(baseColorFactor);
                 mask *= dot(ray.direction, ffNormal);
             } else if (interaction == kSpec) {
                 mask *= vec3(baseColorFactor);
-                ray.origin = isectPositionWorld + 0.05 * ffNormal;
+                ray.origin = isectPositionWorld + 0.03 * ffNormal;
                 ray.direction = reflect(ray.direction, ffNormal);
             } else {
                 // Unknown interaction.
@@ -367,12 +368,13 @@ void main() {
     seed = uvec2((ubo.sampleCount, ubo.sampleCount + 1) * gl_GlobalInvocationID.xy);
 
     Ray ray = generateRay(resolution);
-    //Intersection intersect = sceneIntersect(ray);
+
+    vec3 sampleColor = traceRay(ray);
 
     // store to the storage buffer:
     if (ubo.sampleCount == 0) {
-        imageStore(accumulationImage, ivec2(gl_GlobalInvocationID.xy), vec4(traceRay(ray), 1.0));
+        imageStore(accumulationImage, ivec2(gl_GlobalInvocationID.xy), vec4(sampleColor, 1.0));
     } else {
-        imageStore(accumulationImage, ivec2(gl_GlobalInvocationID.xy), ((imageLoad(accumulationImage, ivec2(gl_GlobalInvocationID.xy)) * ubo.sampleCount) + vec4(traceRay(ray), 1.0)) / (ubo.sampleCount + 1));
+        imageStore(accumulationImage, ivec2(gl_GlobalInvocationID.xy), ((imageLoad(accumulationImage, ivec2(gl_GlobalInvocationID.xy)) * ubo.sampleCount) + vec4(sampleColor, 1.0)) / (ubo.sampleCount + 1));
     }
 }

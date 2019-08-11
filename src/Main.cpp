@@ -13,7 +13,7 @@ int main() {
   // SceneGPUConverter sceneLoader;
 
   cppglfw::GLFWManager& glfwInstance = cppglfw::GLFWManager::instance();
-  cppglfw::Window window = glfwInstance.createWindow("Test", 1920, 1080, {{GLFW_CLIENT_API, GLFW_NO_API}});
+  cppglfw::Window window = glfwInstance.createWindow("Test", 300, 300, {{GLFW_CLIENT_API, GLFW_NO_API}});
 
   RendererConfiguration config;
   RendererPT renderer(window, config);
