@@ -239,6 +239,7 @@ void RendererPT::initializeAccumulationTexture() {
 
   VmaAllocationCreateInfo allocationInfo = {};
   allocationInfo.usage = VmaMemoryUsage::VMA_MEMORY_USAGE_GPU_ONLY;
+  allocationInfo.preferredFlags = VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT;
 
   vk::ImageCreateInfo imageInfo;
   imageInfo.imageType = vk::ImageType::e2D;
