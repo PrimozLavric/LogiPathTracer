@@ -370,6 +370,7 @@ void main() {
     Ray ray = generateRay(resolution);
 
     vec3 sampleColor = traceRay(ray);
+    sampleColor = vec3(1.0, 1.0, 0.0);
 
     // store to the storage buffer:
     if (ubo.sampleCount == 0) {

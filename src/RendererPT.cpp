@@ -9,6 +9,7 @@
 
 RendererPT::RendererPT(const cppglfw::Window& window, const RendererConfiguration& configuration)
   : RendererCore(window, configuration) {
+
   allocator_ = logicalDevice_.createMemoryAllocator();
 
   createTexViewerRenderPass();

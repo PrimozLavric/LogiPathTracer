@@ -56,6 +56,7 @@ class RendererPT : public RendererCore {
   struct CameraGPU {
     glm::mat4 worldMatrix;
     float fovY;
+    std::byte padding[12];
   };
 
   struct PathTracerUBO {
