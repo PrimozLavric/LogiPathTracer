@@ -2,11 +2,14 @@
 	path = libs/Logi
 	url = https://github.com/PrimozLavric/Logi.git
 	branch = master
+	master = master
 [submodule "libs/LogiSceneGraph"]
 	path = libs/LogiSceneGraph
 	url = https://github.com/PrimozLavric/LogiSceneGraph.git
 	branch = master
+	master = master
 [submodule "libs/CppGLFW"]
 	path = libs/CppGLFW
 	url = https://github.com/LanaBesevic/CppGLFW.git
 	branch = master
+	master = master
