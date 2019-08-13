@@ -4,6 +4,7 @@
 #define WORKGROUP_SIZE 32
 layout (local_size_x = WORKGROUP_SIZE, local_size_y = WORKGROUP_SIZE, local_size_z = 1) in;
 
+#define EPS 0.05
 #define PI 3.1415926535897932384626433832795
 #define INFINITY 3.4E+38
 #define INTERSECTION_STACK_SIZE 10
@@ -327,14 +328,14 @@ vec3 traceRay(Ray ray) {
                 vec3 u = normalize(cross((abs(ffNormal.x) > 0.1f ? vec3(0.0f, 1.0f, 0.0f) : vec3(1.0f, 0.0f, 0.0f)), ffNormal));
                 vec3 v = cross(ffNormal, u);
 
-                ray.origin = isectPositionWorld + 0.03 * ffNormal;
+                ray.origin = isectPositionWorld + EPS * ffNormal;
                 ray.direction = normalize(u * cos(r1) * r2s + v * sin(r1) * r2s + ffNormal * sqrt(1.0f - r2));
 
                 mask *= vec3(baseColorFactor);
                 mask *= dot(ray.direction, ffNormal);
             } else if (interaction == kSpec) {
                 mask *= vec3(baseColorFactor);
-                ray.origin = isectPositionWorld + 0.03 * ffNormal;
+                ray.origin = isectPositionWorld + EPS * ffNormal;
                 ray.direction = reflect(ray.direction, ffNormal);
             } else {
                 // Unknown interaction.
