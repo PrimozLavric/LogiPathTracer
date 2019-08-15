@@ -4,7 +4,7 @@
 #define WORKGROUP_SIZE 32
 layout (local_size_x = WORKGROUP_SIZE, local_size_y = WORKGROUP_SIZE, local_size_z = 1) in;
 
-#define EPS 0.05
+#define EPS 0.03
 #define PI 3.1415926535897932384626433832795
 #define INFINITY 3.4E+38
 #define INTERSECTION_STACK_SIZE 10
@@ -16,6 +16,7 @@ layout (local_size_x = WORKGROUP_SIZE, local_size_y = WORKGROUP_SIZE, local_size
 const uint kDiff = 0x00000001u;
 const uint kSpec = 0x00000002u;
 const uint kLight = 0x00000004u;
+const uint kRefr = 0x00000008u;
 
 struct Camera {
     mat4 worldMatrix;
@@ -266,7 +267,11 @@ Intersection sceneIntersect(Ray ray) {
 }
 
 
-uint determineInteractionType(vec3 emissionFactor, float roughnessFactor, float metallicFactor) {
+uint determineInteractionType(vec3 emissionFactor, float roughnessFactor, float metallicFactor, float opacity) {
+    if (opacity < 1.0f) {
+        return kRefr;
+    }
+
     float avgEmissionFactor = (emissionFactor.x + emissionFactor.y + emissionFactor.z) / 3.0f;
     float maxRand = roughnessFactor + metallicFactor + avgEmissionFactor;
     if (maxRand == 0.0f) {
@@ -282,6 +287,21 @@ uint determineInteractionType(vec3 emissionFactor, float roughnessFactor, float 
     } else {
         return kLight;
     }
+}
+
+
+float calcFresnelReflectance(vec3 n, vec3 nl, vec3 rayDirection, float nc, float nt, out vec3 tdir) {
+    float nnt = dot(rayDirection, n) < 0.0 ? (nc / nt) : (nt / nc);
+
+    tdir = refract(rayDirection, nl, nnt);
+
+    // Original Fresnel equations
+    float cosThetaInc = dot(nl, rayDirection);
+    float cosThetaTra = dot(nl, tdir);
+    float coefPara = (nt * cosThetaInc - nc * cosThetaTra) / (nt * cosThetaInc + nc * cosThetaTra);
+    float coefPerp = (nc * cosThetaInc - nt * cosThetaTra) / (nc * cosThetaInc + nt * cosThetaTra);
+
+    return (coefPara * coefPara + coefPerp * coefPerp) * 0.5; // Unpolarized
 }
 
 
@@ -302,9 +322,10 @@ vec3 traceRay(Ray ray) {
         vec3 emissionFactor = objects[isect.objectIndex].emissionFactor;
         float roughnessFactor = objects[isect.objectIndex].roughnessFactor;
         float metallicFactor = objects[isect.objectIndex].metallicFactor;
+        float opacity = baseColorFactor.w;
 
-        // Determine interaction type based on the emission, roughness and metalic factor.
-        uint interaction = determineInteractionType(emissionFactor, roughnessFactor, metallicFactor);
+        // Determine interaction type based on the emission, roughness and metalic factor and opacity.
+        uint interaction = determineInteractionType(emissionFactor, roughnessFactor, metallicFactor, opacity);
 
         // Compute normal
         if (interaction == kLight) {
@@ -337,6 +358,23 @@ vec3 traceRay(Ray ray) {
                 mask *= vec3(baseColorFactor);
                 ray.origin = isectPositionWorld + EPS * ffNormal;
                 ray.direction = reflect(ray.direction, ffNormal);
+            } else if (interaction == kRefr) {
+                float nc = 1.0f;
+                float nt = 1.5f;
+                vec3 tdir;
+
+                float Re = calcFresnelReflectance(normal, ffNormal, ray.direction, nc, nt, tdir);
+
+                float r = rand();
+
+                if (r < Re) { // reflect ray from surface
+                    ray.origin = isectPositionWorld + EPS * ffNormal;
+                    ray.direction = reflect(ray.direction, ffNormal);
+                } else { // transmit ray through surface
+                    mask *= vec3(baseColorFactor) * (1.0f - opacity);
+                    ray.origin = isectPositionWorld - EPS * ffNormal;
+                    ray.direction = tdir;
+                }
             } else {
                 // Unknown interaction.
                 break;
