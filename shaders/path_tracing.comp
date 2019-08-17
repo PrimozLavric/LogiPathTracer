@@ -4,7 +4,7 @@
 #define WORKGROUP_SIZE 32
 layout (local_size_x = WORKGROUP_SIZE, local_size_y = WORKGROUP_SIZE, local_size_z = 1) in;
 
-#define EPS 0.03
+#define EPS 0.05
 #define PI 3.1415926535897932384626433832795
 #define INFINITY 3.4E+38
 #define INTERSECTION_STACK_SIZE 10
