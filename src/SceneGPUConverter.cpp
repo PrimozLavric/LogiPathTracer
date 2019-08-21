@@ -4,13 +4,13 @@
 
 #include "SceneGPUConverter.hpp"
 
-GPUObjectData::GPUObjectData(const glm::mat4& world_matrix, const glm::mat4& world_matrix_inverse,
-                             const glm::vec4& base_color_factor, const glm::vec3& emission_factor,
-                             float metallic_factor, float roughness_factor, uint32_t bvh_offset,
-                             uint32_t vertices_offset)
-  : worldMatrix(world_matrix), worldMatrixInverse(world_matrix_inverse), baseColorFactor(base_color_factor),
-    emissionFactor(emission_factor), metallicFactor(metallic_factor), roughnessFactor(roughness_factor),
-    bvhOffset(bvh_offset), verticesOffset(vertices_offset) {}
+GPUObjectData::GPUObjectData(const glm::mat4& worldMatrix, const glm::mat4& worldMatrixInverse,
+                             const glm::vec4& baseColorFactor, const glm::vec3& emissionFactor, float metallicFactor,
+                             float roughnessFactor, float transmissionFactor, float ior, uint32_t bvhOffset,
+                             uint32_t verticesOffset)
+  : worldMatrix(worldMatrix), worldMatrixInverse(worldMatrixInverse), baseColorFactor(baseColorFactor),
+    emissionFactor(emissionFactor), metallicFactor(metallicFactor), roughnessFactor(roughnessFactor),
+    transmissionFactor(transmissionFactor), ior(ior), bvhOffset(bvhOffset), verticesOffset(verticesOffset) {}
 
 GPUVertex::GPUVertex(const glm::vec3& position, const glm::vec3& normal) : position(position), normal(normal) {}
 
@@ -61,6 +61,8 @@ void SceneGPUConverter::loadScene(const lsg::Ref<lsg::Scene>& scene) {
           objectData.emissionFactor = material->emissiveFactor();
           objectData.metallicFactor = material->metallicFactor();
           objectData.roughnessFactor = material->roughnessFactor();
+          objectData.transmissionFactor = material->transmissionFactor();
+          objectData.ior = material->ior();
           objectData.bvhOffset = meshBVHNodes_.size();
           objectData.verticesOffset = vertices_.size();
 

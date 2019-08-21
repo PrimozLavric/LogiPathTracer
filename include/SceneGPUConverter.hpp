@@ -10,19 +10,22 @@
 #include <vector>
 
 struct GPUObjectData {
-  explicit GPUObjectData(const glm::mat4& world_matrix = {}, const glm::mat4& world_matrix_inverse = {},
-                         const glm::vec4& base_color_factor = {}, const glm::vec3& emission_factor = {},
-                         float metallic_factor = {}, float roughness_factor = {}, uint32_t bvh_offset = {},
-                         uint32_t vertices_offset = {});
+  explicit GPUObjectData(const glm::mat4& worldMatrix = {}, const glm::mat4& worldMatrixInverse = {},
+                         const glm::vec4& baseColorFactor = {}, const glm::vec3& emissionFactor = {},
+                         float metallicFactor = {}, float roughnessFactor = {}, float transmissionFactor = {},
+                         float ior = {}, uint32_t bvhOffset = {}, uint32_t verticesOffset = {});
 
   glm::mat4 worldMatrix;
   glm::mat4 worldMatrixInverse;
   glm::vec4 baseColorFactor;
-  alignas(16) glm::vec3 emissionFactor;
-  alignas(4) float metallicFactor;
-  alignas(4) float roughnessFactor;
-  alignas(4) uint32_t bvhOffset;
-  alignas(8) uint32_t verticesOffset;
+  glm::vec3 emissionFactor;
+  float metallicFactor;
+  float roughnessFactor;
+  float transmissionFactor;
+  float ior;
+  uint32_t bvhOffset;
+  uint32_t verticesOffset;
+  std::byte padding[12];
 };
 
 struct GPUVertex {

@@ -28,8 +28,8 @@ int main() {
   RendererPT renderer(window, config);
   auto loadThread = std::thread([&]() { renderer.loadScene(scenes[0]); });
 
-  std::chrono::time_point<std::chrono::system_clock> currentTime = std::chrono::high_resolution_clock::now();
-  std::chrono::time_point<std::chrono::system_clock> previousTime;
+  auto currentTime = std::chrono::high_resolution_clock::now();
+  decltype(currentTime) previousTime;
 
   while (!window.shouldClose()) {
     // Update timepoints and compute delta time.
