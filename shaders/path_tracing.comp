@@ -9,12 +9,13 @@
 #include "heitz_microfacet.h"
 #include "constants.h"
 
+
 precision highp float;
 
-#define WORKGROUP_SIZE 16
+#define WORKGROUP_SIZE 32
 layout (local_size_x = WORKGROUP_SIZE, local_size_y = WORKGROUP_SIZE, local_size_z = 1) in;
 
-#define INTERSECTION_STACK_SIZE 10
+#define INTERSECTION_STACK_SIZE 32
 #define MAX_TRACE_DEPTH 10
 #define RUSSIAN_ROULETTE_BOUNCES 2
 
@@ -63,6 +64,8 @@ struct Intersection {
     uint objectIndex;
     uint primitiveIndex;
 };
+
+uint prevPrimitive = 4294967295;
 
 struct State {
     Object obj;// Intersected object.
@@ -127,14 +130,7 @@ void objectIntersect(Ray ray, uint objectIndex, inout Intersection intersection)
     // Transform ray to object space
     Ray rayObjSpace;
     rayObjSpace.origin = vec3(objects[objectIndex].worldMatrixInverse * vec4(ray.origin, 1.0));
-    rayObjSpace.direction = normalize(mat3(objects[objectIndex].worldMatrixInverse) * ray.direction);
-
-    // Transform current min distance to object space.
-    float minDistanceOS = intersection.distance;
-    if (minDistanceOS != INFINITY) {
-        vec3 minIsectPoint = ray.origin + ray.direction * minDistanceOS;
-        minDistanceOS = length(vec3(objects[objectIndex].worldMatrixInverse * vec4(minIsectPoint, 1.0)) - rayObjSpace.origin);
-    }
+    rayObjSpace.direction = mat3(objects[objectIndex].worldMatrixInverse) * ray.direction;
 
     // Initialize stack.
     uint ptr = 0;
@@ -148,15 +144,20 @@ void objectIntersect(Ray ray, uint objectIndex, inout Intersection intersection)
         // Determine if the ray intersects current node's AABB.
         float distanceAABB = rayAABBIntersect(rayObjSpace, meshBVHNodes[offsetIdx].minCorner, meshBVHNodes[offsetIdx].maxCorner);
 
-        if (distanceAABB != minDistanceOS) {
+        if (distanceAABB < intersection.distance) {
             if (meshBVHNodes[offsetIdx].isLeaf) {
                 // Test intersections.
                 for (uint i = meshBVHNodes[offsetIdx].indices.x; i < meshBVHNodes[offsetIdx].indices.y; i++) {
                     uint firstVertexIdx = verticesOffset + 3 * i;
+
+                    if (prevPrimitive == firstVertexIdx) {
+                        continue;
+                    }
+
                     float triDistance = rayTriangleIntersect(rayObjSpace, vertices[firstVertexIdx].position, vertices[firstVertexIdx + 1].position, vertices[firstVertexIdx + 2].position);
 
-                    if (triDistance < minDistanceOS) {
-                        minDistanceOS = triDistance;
+                    if (triDistance > EPS && triDistance < intersection.distance) {
+                        intersection.distance = triDistance;
                         intersection.objectIndex = objectIndex;
                         intersection.primitiveIndex = firstVertexIdx;
                     }
@@ -169,12 +170,6 @@ void objectIntersect(Ray ray, uint objectIndex, inout Intersection intersection)
         }
 
         idx = traversalStack[--ptr];
-    }
-
-    // Transform current min distance back to world space.
-    if (minDistanceOS != INFINITY) {
-        vec3 minIsectPoint = rayObjSpace.origin + rayObjSpace.direction * minDistanceOS;
-        intersection.distance = length(vec3(objects[objectIndex].worldMatrix * vec4(minIsectPoint, 1.0)) - rayObjSpace.origin);
     }
 }
 
@@ -193,7 +188,7 @@ Intersection sceneIntersect(Ray ray) {
         // Determine if the ray intersects current node's AABB.
         float distanceAABB = rayAABBIntersect(ray, objectBVHNodes[idx].minCorner, objectBVHNodes[idx].maxCorner);
 
-        if (distanceAABB != INFINITY) {
+        if (distanceAABB < intersection.distance) {
             if (objectBVHNodes[idx].isLeaf) {
                 // Test intersections.
                 for (uint i = objectBVHNodes[idx].indices.x; i < objectBVHNodes[idx].indices.y; i++) {
@@ -207,6 +202,10 @@ Intersection sceneIntersect(Ray ray) {
         }
 
         idx = traversalStack[--ptr];
+    }
+
+    if (intersection.distance != INFINITY) {
+        prevPrimitive = intersection.primitiveIndex;
     }
 
     return intersection;
@@ -241,7 +240,8 @@ vec3 traceRay(Ray ray) {
     vec3 accColor = vec3(0.0, 0.0, 0.0);
     vec3 mask = vec3(1.0, 1.0, 1.0);
 
-    for (uint bounce = 0; bounce < MAX_TRACE_DEPTH; bounce++) {
+    uint bounce;
+    for (bounce = 0; bounce < MAX_TRACE_DEPTH; bounce++) {
         Intersection isect = sceneIntersect(ray);
 
         // Missed.
@@ -251,7 +251,7 @@ vec3 traceRay(Ray ray) {
 
         vec4 baseColorFactor = objects[isect.objectIndex].baseColorFactor;
         vec3 emissionFactor = objects[isect.objectIndex].emissionFactor;
-        float roughnessFactor = objects[isect.objectIndex].roughnessFactor;
+        float roughnessFactor = max(objects[isect.objectIndex].roughnessFactor, 0.001f);
         float metallicFactor = objects[isect.objectIndex].metallicFactor;
         float transmissionFactor = objects[isect.objectIndex].transmissionFactor;
         float ior = objects[isect.objectIndex].ior;
@@ -272,7 +272,6 @@ vec3 traceRay(Ray ray) {
         vec3 bary = barycentricCoord(rayObjSpace.origin + isect.distance * rayObjSpace.direction, vertices[isect.primitiveIndex].position, vertices[isect.primitiveIndex + 1].position, vertices[isect.primitiveIndex + 2].position);
         vec3 normal = normalize(mat3(objects[isect.objectIndex].worldMatrix) * (bary.x * vertices[isect.primitiveIndex].normal + bary.y * vertices[isect.primitiveIndex + 1].normal + bary.z * vertices[isect.primitiveIndex + 2].normal));
 
-        return normal;
 
         vec3 ffNormal = (dot(normal, ray.direction) < 0.0f) ? normal : normal * -1.0f;// front facing normal
         vec3 u = normalize(cross((abs(ffNormal.x) > 0.1f ? vec3(0.0f, 1.0f, 0.0f) : vec3(1.0f, 0.0f, 0.0f)), ffNormal));
@@ -286,18 +285,20 @@ vec3 traceRay(Ray ray) {
 
         if (interaction == kDiff) {
             mask *= DiffuseBSDF(SRGBToLinear(baseColorFactor.xyz), viewDir, roughnessFactor, lightDir);
-            //return vec3(1.0f, 0.0f, 0.0f);
         } else if (interaction == kSpec) {
             mask *= ConductorBRDF(SRGBToLinear(baseColorFactor.xyz), viewDir, roughnessFactor, lightDir);
-            //return vec3(0.0f, 1.0f, 0.0f);
         } else if (interaction == kTrans) {
             mask *= DielectricBSDF(SRGBToLinear(baseColorFactor.xyz), viewDir, roughnessFactor, transmissionFactor, ior, lightDir);
-            //return vec3(0.0f, 0.0f, 1.0f);
         }
+
 
         lightDir = lightDir.x * u + lightDir.y * v + lightDir.z * ffNormal;
 
-        ray.origin = isectPositionWorld + EPS * ffNormal;
+        if (dot(normal, ffNormal) > 0.0f) {
+            ray.origin = isectPositionWorld;
+        } else {
+            ray.origin = isectPositionWorld;
+        }
         ray.direction = lightDir;
 
         if (length(mask) < 0.5 && bounce > RUSSIAN_ROULETTE_BOUNCES) {

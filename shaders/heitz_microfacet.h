@@ -5,18 +5,6 @@
 
 #define HEITZ_CONDUCTOR_MAX_ORDER 3
 
-void buildOrthonormalBasis(vec3 omega_1, vec3 omega_2, vec3 omega_3) {
-  if (omega_3.z < -0.9999999f) {
-    omega_1 = vec3(0.0f, -1.0f, 0.0f);
-    omega_2 = vec3(-1.0f, 0.0f, 0.0f);
-  } else {
-    const float a = 1.0f / (1.0f + omega_3.z);
-    const float b = -omega_3.x * omega_3.y * a;
-    omega_1 = vec3(1.0f - omega_3.x * omega_3.x * a, b, -omega_3.x);
-    omega_2 = vec3(b, 1.0f - omega_3.y * omega_3.y * a, -omega_3.y);
-  }
-}
-
 float Fresnel(const float vdoth, const float eta) {
   const float cos_theta_t2 = 1.0f - (1.0f - vdoth * vdoth) / (eta * eta);
 
@@ -146,7 +134,7 @@ vec3 ConductorBRDF(vec3 F0, vec3 viewDir, float roughness, out vec3 lightDir) {
   return energy;
 }
 
-vec3 SampleDielectricPhaseFunction(vec3 viewDir, float alpha, float transmittance, float eta, out bool outside) {
+vec3 SampleDielectricPhaseFunction(vec3 viewDir, float alpha, float eta, out bool outside) {
   // Generate micro normal according to the distribution of visible normals
   vec3 microNormal = SampleGGXVNDF(viewDir, alpha);
 
@@ -155,13 +143,10 @@ vec3 SampleDielectricPhaseFunction(vec3 viewDir, float alpha, float transmittanc
   float vdoth = dot(viewDir, microNormal);
   vdoth = clamp(vdoth, 0.0f, 1.0f);
 
-  // Perfect mirror reflection
-  vec3 reflDir = 2.0f * microNormal * vdoth - viewDir;
-
   // Schlick Fresnel factor
   float F = Fresnel(vdoth, eta);
 
-  if (rand() < F) {
+  if (true || rand() < F) {
     // Reflect
     outside = true;
     vec3 reflDir = 2.0f * microNormal * vdoth - viewDir;
@@ -169,7 +154,7 @@ vec3 SampleDielectricPhaseFunction(vec3 viewDir, float alpha, float transmittanc
   } else {
     // Refract
     outside = false;
-    vec3 refrDir = refractEta(viewDir, microNormal, eta);
+    vec3 refrDir = refract(viewDir, -microNormal, eta); // refractEta(viewDir, microNormal, eta);
     return normalize(refrDir);
   }
 }
@@ -187,40 +172,44 @@ vec3 DielectricBSDF(vec3 F0, vec3 viewDir, float roughness, float transmittance,
   int order = 0;
   while (order <= HEITZ_CONDUCTOR_MAX_ORDER) {
     // Next height
-    if (outside) {
+    if (true || outside) {
       height = SampleGGXHeight(lightDir, height, alpha);
 
       // Left the microsurface?
-      if (height > 0.0f)
+      if (height > 0.0f) {
         break;
+      }
+
+      // Next direction, plus weight
+      lightDir = SampleDielectricPhaseFunction(-lightDir, alpha, (outside ? ior : 1.0f / ior), outside);
     } else {
       // TODO: Is it negative?
-      height = SampleGGXHeight(-lightDir, height, alpha);
+      height = -SampleGGXHeight(-lightDir, -height, alpha);
 
       // Left the microsurface?
-      if (height < 0.0f)
+      if (height < 0.0f) {
         break;
+      }
+
+      // Next direction, plus weight
+      lightDir = SampleDielectricPhaseFunction(-lightDir, alpha, (outside ? ior : 1.0f / ior), outside);
     }
 
-    // Next direction, plus weight
-    lightDir = SampleDielectricPhaseFunction(-lightDir, alpha, transmittance, (outside ? ior : 1.0f / ior), outside);
-
     // Update energy throughput
-    energy *= F0;
+    // energy *= F0;
 
     order++;
   }
 
-  return energy;
+  return vec3(1.0);
 }
 
 vec3 SampleDiffusePhaseFunction(vec3 viewDir, float alpha) {
   // Generate micro normal according to the distribution of visible normals
   vec3 microNormal = SampleGGXVNDF(viewDir, alpha);
 
-  vec3 u;
-  vec3 v;
-  buildOrthonormalBasis(u, v, microNormal);
+  vec3 u = (microNormal.z < 1.0f) ? normalize(cross(vec3(0.0f, 0.0f, 1.0f), microNormal)) : vec3(1.0f, 0.0f, 0.0f);
+  vec3 v = cross(microNormal, u);
 
   float R1 = 2.0f * rand() - 1.0f;
   float R2 = 2.0f * rand() - 1.0f;
@@ -260,8 +249,9 @@ vec3 DiffuseBSDF(vec3 F0, vec3 viewDir, float roughness, out vec3 lightDir) {
     height = SampleGGXHeight(lightDir, height, alpha);
 
     // Left the microsurface?
-    if (height > 0.0f)
+    if (height > 0.0f) {
       break;
+    }
 
     // Next direction, plus weight
     lightDir = SampleDiffusePhaseFunction(-lightDir, alpha);

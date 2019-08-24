@@ -22,7 +22,7 @@ int main() {
   lsg::Ref<lsg::Transform> cameraTransform = camera->getComponent<lsg::Transform>();
 
   cppglfw::GLFWManager& glfwInstance = cppglfw::GLFWManager::instance();
-  cppglfw::Window window = glfwInstance.createWindow("Test", 600, 600, {{GLFW_CLIENT_API, GLFW_NO_API}});
+  cppglfw::Window window = glfwInstance.createWindow("Test", 1024, 768, {{GLFW_CLIENT_API, GLFW_NO_API}});
 
   RendererConfiguration config;
   RendererPT renderer(window, config);
