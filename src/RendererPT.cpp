@@ -9,7 +9,6 @@
 
 RendererPT::RendererPT(const cppglfw::Window& window, const RendererConfiguration& configuration)
   : RendererCore(window, configuration) {
-
   allocator_ = logicalDevice_.createMemoryAllocator();
 
   createTexViewerRenderPass();
@@ -533,8 +532,8 @@ void RendererPT::recordCommandBuffers() {
     mainCmdBuffers_[i].bindDescriptorSets(
       vk::PipelineBindPoint::eCompute, pathTracingPipelineLayoutData_.layout, 0,
       std::vector<vk::DescriptorSet>(pathTracingDescSets_.begin(), pathTracingDescSets_.end()));
-    mainCmdBuffers_[i].dispatch(static_cast<uint32_t>(std::ceil(swapchainImageExtent_.width / float(32))),
-                                static_cast<uint32_t>(std::ceil(swapchainImageExtent_.height / float(32))), 1);
+    mainCmdBuffers_[i].dispatch(static_cast<uint32_t>(std::ceil(swapchainImageExtent_.width / float(16))),
+                                static_cast<uint32_t>(std::ceil(swapchainImageExtent_.height / float(16))), 1);
 
     vk::ImageMemoryBarrier imageMemoryBarrier;
     imageMemoryBarrier.srcAccessMask = vk::AccessFlagBits::eShaderWrite;

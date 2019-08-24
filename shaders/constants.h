@@ -1,0 +1,10 @@
+#ifndef CONSTANTS_H
+#define CONSTANTS_H
+
+#define EPS 0.05
+#define PI 3.141592653589f
+#define PI2 6.28318530718f
+#define INV_PI 0.31830988618f
+#define INV_PI2 0.15915494309f
+
+#endif // CONSTANTS_H

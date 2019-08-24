@@ -1,37 +1,31 @@
 #version 450
 #extension GL_ARB_separate_shader_objects : enable
+#extension GL_GOOGLE_include_directive : require
+
+#include "test.h"
+#include "random.h"
+#include "util.h"
+#include "ray.h"
+#include "heitz_microfacet.h"
+#include "constants.h"
 
 precision highp float;
 
-#define WORKGROUP_SIZE 32
+#define WORKGROUP_SIZE 16
 layout (local_size_x = WORKGROUP_SIZE, local_size_y = WORKGROUP_SIZE, local_size_z = 1) in;
 
-#define EPS 0.05
-#define PI 3.141592653589f
-#define PI2 6.28318530718f
-#define INV_PI 0.31830988618f
-#define INV_PI2 0.15915494309f
-
-#define INFINITY 3.4E+38
 #define INTERSECTION_STACK_SIZE 10
 #define MAX_TRACE_DEPTH 10
-
 #define RUSSIAN_ROULETTE_BOUNCES 2
 
 // Interaction type
 const uint kDiff = 0x00000001u;
 const uint kSpec = 0x00000002u;
-const uint kLight = 0x00000004u;
-const uint kRefr = 0x00000008u;
+const uint kTrans = 0x00000004u;
 
 struct Camera {
     mat4 worldMatrix;
     float fovY;
-};
-
-struct Ray {
-    vec3 origin;
-    vec3 direction;
 };
 
 struct BVHNode {
@@ -103,84 +97,6 @@ layout(std430, set = 0, binding = 5) buffer TrianglesBVHBuffer {
 };
 
 
-uvec2 seed;
-float rand(){
-    seed += uvec2(1);
-    //return fract(sin(dot(seed.xy, vec2(12.9898, 78.233))) * 43758.5453);
-    uvec2 q = 1103515245U * ((seed >> 1U) ^ (seed.yx));
-    uint  n = 1103515245U * ((q.x) ^ (q.y >> 3U));
-    return float(n) * (1.0 / float(0xffffffffU));
-}
-
-vec3 barycentricCoord(vec3 point, vec3 v0, vec3 v1, vec3 v2) {
-    vec3 ab = v1 - v0;
-    vec3 ac = v2 - v0;
-    vec3 ah = point - v0;
-
-    float ab_ab = dot(ab, ab);
-    float ab_ac = dot(ab, ac);
-    float ac_ac = dot(ac, ac);
-    float ab_ah = dot(ab, ah);
-    float ac_ah = dot(ac, ah);
-
-    float inv_denom = 1.0 / (ab_ab * ac_ac - ab_ac * ab_ac);
-
-    float v = (ac_ac * ab_ah - ab_ac * ac_ah) * inv_denom;
-    float w = (ab_ab * ac_ah - ab_ac * ab_ah) * inv_denom;
-    float u = 1.0 - v - w;
-
-    return vec3(u, v, w);
-}
-
-float rayAABBIntersect(Ray ray, vec3 minCorner, vec3 maxCorner) {
-    vec3 invDir = 1.0 / ray.direction;
-    vec3 near = (minCorner - ray.origin) * invDir;
-    vec3 far  = (maxCorner - ray.origin) * invDir;
-
-    vec3 tmin = min(near, far);
-    vec3 tmax = max(near, far);
-
-    float t0 = max(max(tmin.x, tmin.y), tmin.z);
-    float t1 = min(min(tmax.x, tmax.y), tmax.z);
-
-    if (t0 > t1) {
-        return INFINITY;
-    }
-
-    // If we are outside the box
-    if (t0 > 0.0) {
-        return t0;
-    }
-
-    // If we are inside the box.
-    if (t1 > 0.0) {
-        return t1;
-    }
-
-    return INFINITY;
-}
-
-float rayTriangleIntersect(Ray ray, vec3 v0, vec3 v1, vec3 v2) {
-    vec3 edge1 = v1 - v0;
-    vec3 edge2 = v2 - v0;
-    vec3 pvec = cross(ray.direction, edge2);
-    float det = 1.0 / dot(edge1, pvec);
-
-    vec3 tvec = ray.origin - v0;
-    float u = dot(tvec, pvec) * det;
-    if (u < 0.0 || u > 1.0) {
-        return INFINITY;
-    }
-
-    vec3 qvec = cross(tvec, edge1);
-    float v = dot(ray.direction, qvec) * det;
-    if (v < 0.0 || u + v > 1.0) {
-        return INFINITY;
-    }
-
-    return dot(edge2, qvec) * det;
-}
-
 Ray generateRay(vec2 resolution) {
     vec2 jitter;
 
@@ -211,7 +127,14 @@ void objectIntersect(Ray ray, uint objectIndex, inout Intersection intersection)
     // Transform ray to object space
     Ray rayObjSpace;
     rayObjSpace.origin = vec3(objects[objectIndex].worldMatrixInverse * vec4(ray.origin, 1.0));
-    rayObjSpace.direction = mat3(objects[objectIndex].worldMatrixInverse) * ray.direction;
+    rayObjSpace.direction = normalize(mat3(objects[objectIndex].worldMatrixInverse) * ray.direction);
+
+    // Transform current min distance to object space.
+    float minDistanceOS = intersection.distance;
+    if (minDistanceOS != INFINITY) {
+        vec3 minIsectPoint = ray.origin + ray.direction * minDistanceOS;
+        minDistanceOS = length(vec3(objects[objectIndex].worldMatrixInverse * vec4(minIsectPoint, 1.0)) - rayObjSpace.origin);
+    }
 
     // Initialize stack.
     uint ptr = 0;
@@ -225,15 +148,15 @@ void objectIntersect(Ray ray, uint objectIndex, inout Intersection intersection)
         // Determine if the ray intersects current node's AABB.
         float distanceAABB = rayAABBIntersect(rayObjSpace, meshBVHNodes[offsetIdx].minCorner, meshBVHNodes[offsetIdx].maxCorner);
 
-        if (distanceAABB != INFINITY) {
+        if (distanceAABB != minDistanceOS) {
             if (meshBVHNodes[offsetIdx].isLeaf) {
                 // Test intersections.
                 for (uint i = meshBVHNodes[offsetIdx].indices.x; i < meshBVHNodes[offsetIdx].indices.y; i++) {
                     uint firstVertexIdx = verticesOffset + 3 * i;
                     float triDistance = rayTriangleIntersect(rayObjSpace, vertices[firstVertexIdx].position, vertices[firstVertexIdx + 1].position, vertices[firstVertexIdx + 2].position);
 
-                    if (triDistance < intersection.distance) {
-                        intersection.distance = triDistance;
+                    if (triDistance < minDistanceOS) {
+                        minDistanceOS = triDistance;
                         intersection.objectIndex = objectIndex;
                         intersection.primitiveIndex = firstVertexIdx;
                     }
@@ -246,6 +169,12 @@ void objectIntersect(Ray ray, uint objectIndex, inout Intersection intersection)
         }
 
         idx = traversalStack[--ptr];
+    }
+
+    // Transform current min distance back to world space.
+    if (minDistanceOS != INFINITY) {
+        vec3 minIsectPoint = rayObjSpace.origin + rayObjSpace.direction * minDistanceOS;
+        intersection.distance = length(vec3(objects[objectIndex].worldMatrix * vec4(minIsectPoint, 1.0)) - rayObjSpace.origin);
     }
 }
 
@@ -283,47 +212,32 @@ Intersection sceneIntersect(Ray ray) {
     return intersection;
 }
 
+uint determineInteractionType(float roughnessFactor, float metallicFactor, float transmissionFactor) {
+    float metallicBRDF   = metallicFactor;
+    float specularBSDF   = (1.0f - metallicFactor) * transmissionFactor;
+    float dielectricBRDF = (1.0f - transmissionFactor) * (1.0f - metallicFactor);
 
-uint determineInteractionType(vec3 emissionFactor, float roughnessFactor, float metallicFactor, float opacity) {
-    if (opacity < 1.0f) {
-        return kRefr;
-    }
+    float specularWeight = metallicBRDF;
+    float transmissionWeight = specularBSDF;
+    float diffuseWeight = dielectricBRDF;
 
-    float avgEmissionFactor = (emissionFactor.x + emissionFactor.y + emissionFactor.z) / 3.0f;
-    float maxRand = roughnessFactor + metallicFactor + avgEmissionFactor;
-    if (maxRand == 0.0f) {
-        return kDiff;
-    }
+    float norm = 1.0f / (specularWeight + transmissionWeight + diffuseWeight);
+    specularWeight *= norm;
+    transmissionWeight *= norm;
+    diffuseWeight *= norm;
 
-    float r = rand() * maxRand;
+    float r = rand();
 
-    if (r < roughnessFactor) {
-        return kDiff;
-    } else if (r < roughnessFactor + metallicFactor) {
+    if (r < specularWeight) {
         return kSpec;
+    } else if (r < specularWeight + transmissionWeight) {
+        return kTrans;
     } else {
-        return kLight;
+        return kDiff;
     }
 }
-
-
-float calcFresnelReflectance(vec3 n, vec3 nl, vec3 rayDirection, float nc, float nt, out vec3 tdir) {
-    float nnt = dot(rayDirection, n) < 0.0 ? (nc / nt) : (nt / nc);
-
-    tdir = refract(rayDirection, nl, nnt);
-
-    // Original Fresnel equations
-    float cosThetaInc = dot(nl, rayDirection);
-    float cosThetaTra = dot(nl, tdir);
-    float coefPara = (nt * cosThetaInc - nc * cosThetaTra) / (nt * cosThetaInc + nc * cosThetaTra);
-    float coefPerp = (nc * cosThetaInc - nt * cosThetaTra) / (nc * cosThetaInc + nt * cosThetaTra);
-
-    return (coefPara * coefPara + coefPerp * coefPerp) * 0.5;// Unpolarized
-}
-
 
 vec3 traceRay(Ray ray) {
-
     vec3 accColor = vec3(0.0, 0.0, 0.0);
     vec3 mask = vec3(1.0, 1.0, 1.0);
 
@@ -339,64 +253,52 @@ vec3 traceRay(Ray ray) {
         vec3 emissionFactor = objects[isect.objectIndex].emissionFactor;
         float roughnessFactor = objects[isect.objectIndex].roughnessFactor;
         float metallicFactor = objects[isect.objectIndex].metallicFactor;
+        float transmissionFactor = objects[isect.objectIndex].transmissionFactor;
+        float ior = objects[isect.objectIndex].ior;
         float opacity = baseColorFactor.w;
 
         // Determine interaction type based on the emission, roughness and metalic factor and opacity.
-        uint interaction = determineInteractionType(emissionFactor, roughnessFactor, metallicFactor, opacity);
+        uint interaction = determineInteractionType(roughnessFactor, metallicFactor, transmissionFactor);
 
-        // Compute normal
-        if (interaction == kLight) {
-            accColor = mask * emissionFactor * 10.0f;
-        } else {
-            Ray rayObjSpace;
-            rayObjSpace.origin = vec3(objects[isect.objectIndex].worldMatrixInverse * vec4(ray.origin, 1));
-            rayObjSpace.direction = mat3(objects[isect.objectIndex].worldMatrixInverse) * ray.direction;
+        // Apple emission.
+        accColor += mask * emissionFactor * 20.0f;
 
-            vec3 isectPositionWorld = ray.origin + isect.distance * ray.direction;
-            vec3 bary = barycentricCoord(rayObjSpace.origin + isect.distance * rayObjSpace.direction, vertices[isect.primitiveIndex].position, vertices[isect.primitiveIndex + 1].position, vertices[isect.primitiveIndex + 2].position);
-            vec3 normal = normalize(mat3(objects[isect.objectIndex].worldMatrix) * (bary.x * vertices[isect.primitiveIndex].normal + bary.y * vertices[isect.primitiveIndex + 1].normal + bary.z * vertices[isect.primitiveIndex + 2].normal));
+        // Compute intersection position and normal
+        Ray rayObjSpace;
+        rayObjSpace.origin = vec3(objects[isect.objectIndex].worldMatrixInverse * vec4(ray.origin, 1));
+        rayObjSpace.direction = mat3(objects[isect.objectIndex].worldMatrixInverse) * ray.direction;
 
-            vec3 ffNormal = (dot(normal, ray.direction) < 0.0f) ? normal : normal * -1.0f;// front facing normal
+        vec3 isectPositionWorld = ray.origin + isect.distance * ray.direction;
+        vec3 bary = barycentricCoord(rayObjSpace.origin + isect.distance * rayObjSpace.direction, vertices[isect.primitiveIndex].position, vertices[isect.primitiveIndex + 1].position, vertices[isect.primitiveIndex + 2].position);
+        vec3 normal = normalize(mat3(objects[isect.objectIndex].worldMatrix) * (bary.x * vertices[isect.primitiveIndex].normal + bary.y * vertices[isect.primitiveIndex + 1].normal + bary.z * vertices[isect.primitiveIndex + 2].normal));
 
-            if (interaction == kDiff) {
-                float r1 = 2.0f * PI * rand();// pick random number on unit circle (radius = 1, circumference = 2*Pi) for azimuth
-                float r2 = rand();// pick random number for elevation
-                float r2s = sqrt(r2);
+        return normal;
 
-                vec3 u = normalize(cross((abs(ffNormal.x) > 0.1f ? vec3(0.0f, 1.0f, 0.0f) : vec3(1.0f, 0.0f, 0.0f)), ffNormal));
-                vec3 v = cross(ffNormal, u);
+        vec3 ffNormal = (dot(normal, ray.direction) < 0.0f) ? normal : normal * -1.0f;// front facing normal
+        vec3 u = normalize(cross((abs(ffNormal.x) > 0.1f ? vec3(0.0f, 1.0f, 0.0f) : vec3(1.0f, 0.0f, 0.0f)), ffNormal));
+        vec3 v = cross(ffNormal, u);
 
-                ray.origin = isectPositionWorld + EPS * ffNormal;
-                ray.direction = normalize(u * cos(r1) * r2s + v * sin(r1) * r2s + ffNormal * sqrt(1.0f - r2));
+        vec3 viewDir;
+        vec3 lightDir;
+        viewDir.x = dot(-ray.direction, u);
+        viewDir.y = dot(-ray.direction, v);
+        viewDir.z = dot(-ray.direction, ffNormal);
 
-                mask *= vec3(baseColorFactor);
-                mask *= dot(ray.direction, ffNormal);
-            } else if (interaction == kSpec) {
-                mask *= vec3(baseColorFactor);
-                ray.origin = isectPositionWorld + EPS * ffNormal;
-                ray.direction = reflect(ray.direction, ffNormal);
-            } else if (interaction == kRefr) {
-                float nc = 1.0f;
-                float nt = 1.5f;
-                vec3 tdir;
-
-                float Re = calcFresnelReflectance(normal, ffNormal, ray.direction, nc, nt, tdir);
-
-                float r = rand();
-
-                if (r < Re) { // reflect ray from surface
-                    ray.origin = isectPositionWorld + EPS * ffNormal;
-                    ray.direction = reflect(ray.direction, ffNormal);
-                } else { // transmit ray through surface
-                    mask *= vec3(baseColorFactor) * (1.0f - opacity);
-                    ray.origin = isectPositionWorld - EPS * ffNormal;
-                    ray.direction = tdir;
-                }
-            } else {
-                // Unknown interaction.
-                break;
-            }
+        if (interaction == kDiff) {
+            mask *= DiffuseBSDF(SRGBToLinear(baseColorFactor.xyz), viewDir, roughnessFactor, lightDir);
+            //return vec3(1.0f, 0.0f, 0.0f);
+        } else if (interaction == kSpec) {
+            mask *= ConductorBRDF(SRGBToLinear(baseColorFactor.xyz), viewDir, roughnessFactor, lightDir);
+            //return vec3(0.0f, 1.0f, 0.0f);
+        } else if (interaction == kTrans) {
+            mask *= DielectricBSDF(SRGBToLinear(baseColorFactor.xyz), viewDir, roughnessFactor, transmissionFactor, ior, lightDir);
+            //return vec3(0.0f, 0.0f, 1.0f);
         }
+
+        lightDir = lightDir.x * u + lightDir.y * v + lightDir.z * ffNormal;
+
+        ray.origin = isectPositionWorld + EPS * ffNormal;
+        ray.direction = lightDir;
 
         if (length(mask) < 0.5 && bounce > RUSSIAN_ROULETTE_BOUNCES) {
             float q = max(0.05f, 1.0f - length(mask));
@@ -424,7 +326,6 @@ void main() {
     seed = uvec2((ubo.sampleCount, ubo.sampleCount + 1) * gl_GlobalInvocationID.xy);
 
     Ray ray = generateRay(resolution);
-
     vec3 sampleColor = traceRay(ray);
 
     // store to the storage buffer:
