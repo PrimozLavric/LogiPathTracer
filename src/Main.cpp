@@ -10,7 +10,7 @@
 
 int main() {
   lsg::GLTFLoader loader;
-  std::vector<lsg::Ref<lsg::Scene>> scenes = loader.load("./resources/cornell_box.gltf");
+  std::vector<lsg::Ref<lsg::Scene>> scenes = loader.load("./resources/outside.gltf");
 
   lsg::Ref<lsg::Object> camera;
   scenes[0]->traverseDown([&](const lsg::Ref<lsg::Object>& object) {
@@ -29,7 +29,7 @@ int main() {
   config.deviceExtensions.emplace_back("VK_NV_ray_tracing");
   config.deviceExtensions.emplace_back("VK_KHR_get_memory_requirements2");
   config.instanceExtensions.emplace_back("VK_KHR_get_physical_device_properties2");
-  RendererRTX renderer(window, config);
+  RendererPT renderer(window, config);
   auto loadThread = std::thread([&]() { renderer.loadScene(scenes[0]); });
 
   auto currentTime = std::chrono::high_resolution_clock::now();

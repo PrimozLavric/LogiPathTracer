@@ -121,6 +121,7 @@ Ray generateRay(vec2 resolution) {
     return Ray(origin, rayDir);
 }
 
+
 void objectIntersect(Ray ray, uint objectIndex, inout Intersection intersection) {
     uint bvhOffset = objects[objectIndex].bvhOffset;
     uint verticesOffset = objects[objectIndex].verticesOffset;
@@ -142,15 +143,16 @@ void objectIntersect(Ray ray, uint objectIndex, inout Intersection intersection)
         // Determine if the ray intersects current node's AABB.
         float distanceAABB = rayAABBIntersect(rayObjSpace, meshBVHNodes[offsetIdx].minCorner, meshBVHNodes[offsetIdx].maxCorner);
 
-        if (distanceAABB < intersection.distance) {
+
+        if (distanceAABB != INFINITY) {
             if (meshBVHNodes[offsetIdx].isLeaf) {
                 // Test intersections.
                 for (uint i = meshBVHNodes[offsetIdx].indices.x; i < meshBVHNodes[offsetIdx].indices.y; i++) {
                     uint firstVertexIdx = verticesOffset + 3 * i;
 
-                    /* if (prevPrimitive == firstVertexIdx) {
+                    if (prevPrimitive == firstVertexIdx) {
                         continue;
-                    }*/
+                    }
 
                     float triDistance = rayTriangleIntersect(rayObjSpace, vertices[firstVertexIdx].position, vertices[firstVertexIdx + 1].position, vertices[firstVertexIdx + 2].position);
 
@@ -187,7 +189,7 @@ Intersection sceneIntersect(Ray ray) {
         // Determine if the ray intersects current node's AABB.
         float distanceAABB = rayAABBIntersect(ray, objectBVHNodes[idx].minCorner, objectBVHNodes[idx].maxCorner);
 
-        if (distanceAABB < intersection.distance) {
+        if (distanceAABB != INFINITY) {
             if (objectBVHNodes[idx].isLeaf) {
                 // Test intersections.
                 for (uint i = objectBVHNodes[idx].indices.x; i < objectBVHNodes[idx].indices.y; i++) {
