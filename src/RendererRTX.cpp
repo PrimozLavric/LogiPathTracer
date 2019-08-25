@@ -7,8 +7,12 @@
 #include <cmath>
 
 RendererRTX::RendererRTX(const cppglfw::Window& window, const RendererConfiguration& configuration)
-  : RendererCore(window, configuration) {
-  allocator_ = logicalDevice_.createMemoryAllocator();
+  : RendererCore(window, configuration), allocator_(logicalDevice_.createMemoryAllocator()),
+    sceneConverter_(allocator_, graphicsFamilyCmdPool_, graphicsQueue_) {
+  // Fetch ray tracing properties.
+  rayTracingProperties_ =
+    physicalDevice_.getProperties2<vk::PhysicalDeviceProperties2, vk::PhysicalDeviceRayTracingPropertiesNV>()
+      .get<vk::PhysicalDeviceRayTracingPropertiesNV>();
 
   createTexViewerRenderPass();
   createFrameBuffers();
@@ -16,7 +20,9 @@ RendererRTX::RendererRTX(const cppglfw::Window& window, const RendererConfigurat
   texViewerPipelineLayoutData_ =
     loadPipelineShaders({{"shaders/tex_to_quad.vert.spv", "main"}, {"shaders/tex_to_quad.frag.spv", "main"}});
 
-  pathTracingPipelineLayoutData_ = loadPipelineShaders({{"shaders/path_tracing.comp.spv", "main"}});
+  pathTracingPipelineLayoutData_ = loadPipelineShaders({{"shaders/closesthit.rchit.spv", "main"},
+                                                        {"shaders/miss.rmiss.spv", "main"},
+                                                        {"shaders/raygen.rgen.spv", "main"}});
 
   createTexViewerPipeline();
   createPathTracingPipeline();
@@ -29,18 +35,25 @@ RendererRTX::RendererRTX(const cppglfw::Window& window, const RendererConfigurat
 
 void RendererRTX::loadScene(const lsg::Ref<lsg::Scene>& scene) {
   sceneLoaded_ = false;
-
   sceneConverter_.loadScene(scene);
-  const std::vector<lsg::Ref<lsg::Object>>& cameras = sceneConverter_.getCameras();
-  if (cameras.empty()) {
-    std::cout << "Loaded scene without cameras." << std::endl;
-    sceneConverter_.clear();
+
+  lsg::Ref<lsg::PerspectiveCamera> camPerspective;
+
+  scene->traverseDown([&](const lsg::Ref<lsg::Object>& object) {
+    if (!camPerspective) {
+      camPerspective = object->getComponent<lsg::PerspectiveCamera>();
+      selectedCameraTransform_ = object->getComponent<lsg::Transform>();
+      return true;
+    } else {
+      return false;
+    }
+  });
+
+  if (!camPerspective) {
+    throw std::runtime_error("Could not find camera.");
   }
 
-  selectedCameraTransform_ = sceneConverter_.getCameras()[0]->getComponent<lsg::Transform>();
-
-  auto cameraData = cameras[0]->getComponent<lsg::PerspectiveCamera>();
-  ubo_.camera.fovY = cameraData->fov();
+  ubo_.camera.fovY = camPerspective->fov();
   ubo_.camera.worldMatrix = selectedCameraTransform_->worldMatrix();
   ubo_.sampleCount = 0;
 
@@ -126,7 +139,7 @@ void RendererRTX::createTexViewerPipeline() {
   vk::PipelineShaderStageCreateInfo fragShaderStageInfo;
   fragShaderStageInfo.stage = vk::ShaderStageFlagBits::eFragment;
   fragShaderStageInfo.module = texViewerPipelineLayoutData_.shaders.at(vk::ShaderStageFlagBits::eFragment);
-  ;
+
   fragShaderStageInfo.pName = "main";
 
   vk::PipelineShaderStageCreateInfo shaderStages[] = {vertShaderStageInfo, fragShaderStageInfo};
@@ -204,21 +217,88 @@ void RendererRTX::createTexViewerPipeline() {
   texViewerPipeline_ = logicalDevice_.createGraphicsPipeline(pipelineInfo);
 }
 
+void RendererRTX::createShaderBindingTable() {
+  // Create buffer for the shader binding table
+  const uint32_t sbtSize = rayTracingProperties_.shaderGroupHandleSize * 3;
+
+  shaderBindingTable_.destroy();
+
+  VmaAllocationCreateInfo allocationInfo = {};
+  allocationInfo.usage = VmaMemoryUsage::VMA_MEMORY_USAGE_CPU_ONLY;
+
+  // Create and init matrices UBO buffer.
+  vk::BufferCreateInfo sbtBufferInfo;
+  sbtBufferInfo.size = sizeof(sbtSize);
+  sbtBufferInfo.usage = vk::BufferUsageFlagBits::eRayTracingNV;
+  sbtBufferInfo.sharingMode = vk::SharingMode::eExclusive;
+
+  shaderBindingTable_ = allocator_.createBuffer(sbtBufferInfo, allocationInfo);
+
+  auto copyShaderIdentifier = [this](uint8_t* data, const uint8_t* shaderHandleStorage, uint32_t groupIndex) {
+    const uint32_t shaderGroupHandleSize = rayTracingProperties_.shaderGroupHandleSize;
+    memcpy(data, shaderHandleStorage + groupIndex * shaderGroupHandleSize, shaderGroupHandleSize);
+    return shaderGroupHandleSize;
+  };
+
+  std::vector<uint8_t> shaderHandleStorage(sbtSize);
+  pathTracingPipeline_.getRayTracingShaderGroupHandlesNV<uint8_t>(0, 3, shaderHandleStorage);
+
+  auto* data = static_cast<uint8_t*>(shaderBindingTable_.mapMemory());
+  // Copy the shader identifiers to the shader binding table
+  data += copyShaderIdentifier(data, shaderHandleStorage.data(), kIndexRaygen);
+  data += copyShaderIdentifier(data, shaderHandleStorage.data(), kIndexMiss);
+  copyShaderIdentifier(data, shaderHandleStorage.data(), kIndexClosestHit);
+  shaderBindingTable_.unmapMemory();
+}
+
 void RendererRTX::createPathTracingPipeline() {
   if (pathTracingPipeline_) {
     pathTracingPipeline_.destroy();
   }
 
-  vk::PipelineShaderStageCreateInfo compShaderStageInfo;
-  compShaderStageInfo.stage = vk::ShaderStageFlagBits::eCompute;
-  compShaderStageInfo.module = pathTracingPipelineLayoutData_.shaders.at(vk::ShaderStageFlagBits::eCompute);
-  compShaderStageInfo.pName = "main";
+  // Setup ray tracing shader groups
+  std::array<vk::RayTracingShaderGroupCreateInfoNV, 3> groups;
+  for (auto& group : groups) {
+    // Init all groups with some default values
+    group.generalShader = VK_SHADER_UNUSED_NV;
+    group.closestHitShader = VK_SHADER_UNUSED_NV;
+    group.anyHitShader = VK_SHADER_UNUSED_NV;
+    group.intersectionShader = VK_SHADER_UNUSED_NV;
+  }
 
-  vk::ComputePipelineCreateInfo pipelineInfo;
-  pipelineInfo.stage = compShaderStageInfo;
+  // Links shaders and types to ray tracing shader groups
+  groups[kIndexRaygen].type = vk::RayTracingShaderGroupTypeNV::eGeneral;
+  groups[kIndexRaygen].generalShader = kIndexRaygen;
+  groups[kIndexMiss].type = vk::RayTracingShaderGroupTypeNV::eGeneral;
+  groups[kIndexMiss].generalShader = kIndexMiss;
+  groups[kIndexClosestHit].type = vk::RayTracingShaderGroupTypeNV::eTrianglesHitGroup;
+  groups[kIndexClosestHit].generalShader = VK_SHADER_UNUSED_NV;
+  groups[kIndexClosestHit].closestHitShader = kIndexClosestHit;
+
+  std::array<vk::PipelineShaderStageCreateInfo, 3> shaderStages;
+  shaderStages[kIndexRaygen].stage = vk::ShaderStageFlagBits::eRaygenNV;
+  shaderStages[kIndexRaygen].pName = "main";
+  shaderStages[kIndexRaygen].module = pathTracingPipelineLayoutData_.shaders.at(vk::ShaderStageFlagBits::eRaygenNV);
+
+  shaderStages[kIndexMiss].stage = vk::ShaderStageFlagBits::eMissNV;
+  shaderStages[kIndexMiss].pName = "main";
+  shaderStages[kIndexMiss].module = pathTracingPipelineLayoutData_.shaders.at(vk::ShaderStageFlagBits::eMissNV);
+
+  shaderStages[kIndexClosestHit].stage = vk::ShaderStageFlagBits::eClosestHitNV;
+  shaderStages[kIndexClosestHit].pName = "main";
+  shaderStages[kIndexClosestHit].module =
+    pathTracingPipelineLayoutData_.shaders.at(vk::ShaderStageFlagBits::eClosestHitNV);
+
+  vk::RayTracingPipelineCreateInfoNV pipelineInfo;
+  pipelineInfo.stageCount = static_cast<uint32_t>(shaderStages.size());
+  pipelineInfo.pStages = shaderStages.data();
+  pipelineInfo.groupCount = static_cast<uint32_t>(groups.size());
+  pipelineInfo.pGroups = groups.data();
+  pipelineInfo.maxRecursionDepth = 20;
   pipelineInfo.layout = pathTracingPipelineLayoutData_.layout;
 
-  pathTracingPipeline_ = logicalDevice_.createComputePipeline(pipelineInfo);
+  pathTracingPipeline_ = logicalDevice_.createRayTracingPipelineNV(pipelineInfo);
+  createShaderBindingTable();
 }
 
 void RendererRTX::onSwapChainRecreate() {
@@ -308,21 +388,19 @@ void RendererRTX::initializeAccumulationTexture() {
 
 void RendererRTX::initializeDescriptorSets() {
   static const size_t numPoolSets = 10;
-  static const std::vector<vk::DescriptorPoolSize> poolSizes = {
-    //{vk::DescriptorType::eSampler, 0},
-    {vk::DescriptorType::eCombinedImageSampler, 1},
-    //{vk::DescriptorType::eSampledImage, 0},
-    {vk::DescriptorType::eStorageImage, 1},
-    //{vk::DescriptorType::eUniformTexelBuffer, 0},
-    //{vk::DescriptorType::eStorageTexelBuffer, 0},
-    {vk::DescriptorType::eUniformBuffer, 1},
-    {vk::DescriptorType::eStorageBuffer, 4},
-    //{vk::DescriptorType::eUniformBufferDynamic, 0},
-    //{vk::DescriptorType::eStorageBufferDynamic, 0},
-    //{vk::DescriptorType::eInputAttachment, 0},
-    //{vk::DescriptorType::eInlineUniformBlockEXT, 0},
-    //{vk::DescriptorType::eAccelerationStructureNV, 0}
-  };
+  static const std::vector<vk::DescriptorPoolSize> poolSizes = {//{vk::DescriptorType::eSampler, 0},
+                                                                {vk::DescriptorType::eCombinedImageSampler, 1},
+                                                                //{vk::DescriptorType::eSampledImage, 0},
+                                                                {vk::DescriptorType::eStorageImage, 1},
+                                                                //{vk::DescriptorType::eUniformTexelBuffer, 0},
+                                                                //{vk::DescriptorType::eStorageTexelBuffer, 0},
+                                                                {vk::DescriptorType::eUniformBuffer, 2},
+                                                                {vk::DescriptorType::eStorageBuffer, 4},
+                                                                //{vk::DescriptorType::eUniformBufferDynamic, 0},
+                                                                //{vk::DescriptorType::eStorageBufferDynamic, 0},
+                                                                //{vk::DescriptorType::eInputAttachment, 0},
+                                                                //{vk::DescriptorType::eInlineUniformBlockEXT, 0},
+                                                                {vk::DescriptorType::eAccelerationStructureNV, 1}};
 
   vk::DescriptorPoolCreateInfo poolInfo;
   poolInfo.pPoolSizes = poolSizes.data();
@@ -404,110 +482,19 @@ void RendererRTX::updateUBOBuffer() {
 }
 
 void RendererRTX::initializeAndBindSceneBuffer() {
-  // Compute data size.
-  vk::DeviceSize objectDataSize = sceneConverter_.getObjectData().size() * sizeof(GPUObjectData);
-  vk::DeviceSize objectBVHNodesOffset = objectDataSize + (256 - objectDataSize % 256);
-  vk::DeviceSize objectBVHNodesSize = sceneConverter_.getObjectBvhNodes().size() * sizeof(GPUBVHNode);
-  vk::DeviceSize verticesOffset =
-    (objectBVHNodesOffset + objectBVHNodesSize) + (256 - (objectBVHNodesOffset + objectBVHNodesSize) % 256);
-  vk::DeviceSize verticesSize = sceneConverter_.getVertices().size() * sizeof(GPUVertex);
-  vk::DeviceSize meshBVHNodesOffset = (verticesOffset + verticesSize) + (256 - (verticesOffset + verticesSize) % 256);
-  vk::DeviceSize meshBVHNodesSize = sceneConverter_.getMeshBvhNodes().size() * sizeof(GPUBVHNode);
-  vk::DeviceSize bufferSize = meshBVHNodesOffset + meshBVHNodesSize;
-
-  // Allocate staging buffer.
-  VmaAllocationCreateInfo stagingBufferAllocationInfo = {};
-  stagingBufferAllocationInfo.usage = VmaMemoryUsage::VMA_MEMORY_USAGE_CPU_TO_GPU;
-
-  vk::BufferCreateInfo stagingBufferInfo;
-  stagingBufferInfo.size = bufferSize;
-  stagingBufferInfo.usage = vk::BufferUsageFlagBits::eTransferSrc;
-  stagingBufferInfo.sharingMode = vk::SharingMode::eExclusive;
-
-  logi::VMABuffer stagingBuffer = allocator_.createBuffer(stagingBufferInfo, stagingBufferAllocationInfo);
-
-  // Fill staging buffer with scene data.
-  stagingBuffer.writeToBuffer(sceneConverter_.getObjectData().data(), objectDataSize);
-  stagingBuffer.writeToBuffer(sceneConverter_.getObjectBvhNodes().data(), objectBVHNodesSize, objectBVHNodesOffset);
-  stagingBuffer.writeToBuffer(sceneConverter_.getVertices().data(), verticesSize, verticesOffset);
-  stagingBuffer.writeToBuffer(sceneConverter_.getMeshBvhNodes().data(), meshBVHNodesSize, meshBVHNodesOffset);
-
-  // Destroy existing scene buffer.
-  if (sceneBuffer_) {
-    sceneBuffer_.destroy();
-  }
-
-  // Allocate scene buffer on GPU
-  VmaAllocationCreateInfo sceneBufferAllocationInfo = {};
-  sceneBufferAllocationInfo.usage = VmaMemoryUsage::VMA_MEMORY_USAGE_GPU_ONLY;
-
-  vk::BufferCreateInfo sceneBufferInfo;
-  sceneBufferInfo.size = bufferSize;
-  sceneBufferInfo.usage = vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eStorageBuffer;
-  sceneBufferInfo.sharingMode = vk::SharingMode::eExclusive;
-
-  sceneBuffer_ = allocator_.createBuffer(sceneBufferInfo, sceneBufferAllocationInfo);
-
-  // Copy scene data from staging buffer to scene buffer.
-  blockingBufferCopy(stagingBuffer, sceneBuffer_, bufferSize);
-
-  // Destroy staging buffer.
-  stagingBuffer.destroy();
-
   // Update descriptor sets.
-  std::array<vk::WriteDescriptorSet, 4> descriptorWrites;
+  std::array<vk::WriteDescriptorSet, 1> descriptorWrites;
 
-  // Object data binding
-  vk::DescriptorBufferInfo objectDataBufferInfo;
-  objectDataBufferInfo.buffer = sceneBuffer_;
-  objectDataBufferInfo.offset = 0;
-  objectDataBufferInfo.range = objectDataSize;
+  vk::WriteDescriptorSetAccelerationStructureNV descriptorAccelerationStructureInfo;
+  descriptorAccelerationStructureInfo.accelerationStructureCount = 1;
+  descriptorAccelerationStructureInfo.pAccelerationStructures =
+    &static_cast<const vk::AccelerationStructureNV&>(sceneConverter_.getTopLevelAccelerationStructure());
 
+  descriptorWrites[0].pNext = &descriptorAccelerationStructureInfo;
   descriptorWrites[0].dstSet = pathTracingDescSets_[0];
   descriptorWrites[0].dstBinding = 2;
-  descriptorWrites[0].dstArrayElement = 0;
-  descriptorWrites[0].descriptorType = vk::DescriptorType::eStorageBuffer;
   descriptorWrites[0].descriptorCount = 1;
-  descriptorWrites[0].pBufferInfo = &objectDataBufferInfo;
-
-  // Object BVH nodes binding
-  vk::DescriptorBufferInfo objectBVHNodesInfo;
-  objectBVHNodesInfo.buffer = sceneBuffer_;
-  objectBVHNodesInfo.offset = objectBVHNodesOffset;
-  objectBVHNodesInfo.range = objectBVHNodesSize;
-
-  descriptorWrites[1].dstSet = pathTracingDescSets_[0];
-  descriptorWrites[1].dstBinding = 3;
-  descriptorWrites[1].dstArrayElement = 0;
-  descriptorWrites[1].descriptorType = vk::DescriptorType::eStorageBuffer;
-  descriptorWrites[1].descriptorCount = 1;
-  descriptorWrites[1].pBufferInfo = &objectBVHNodesInfo;
-
-  // Vertices binding
-  vk::DescriptorBufferInfo verticesInfo;
-  verticesInfo.buffer = sceneBuffer_;
-  verticesInfo.offset = verticesOffset;
-  verticesInfo.range = verticesSize;
-
-  descriptorWrites[2].dstSet = pathTracingDescSets_[0];
-  descriptorWrites[2].dstBinding = 4;
-  descriptorWrites[2].dstArrayElement = 0;
-  descriptorWrites[2].descriptorType = vk::DescriptorType::eStorageBuffer;
-  descriptorWrites[2].descriptorCount = 1;
-  descriptorWrites[2].pBufferInfo = &verticesInfo;
-
-  // Mesh BVH nodes binding
-  vk::DescriptorBufferInfo meshBVHNodesInfo;
-  meshBVHNodesInfo.buffer = sceneBuffer_;
-  meshBVHNodesInfo.offset = meshBVHNodesOffset;
-  meshBVHNodesInfo.range = meshBVHNodesSize;
-
-  descriptorWrites[3].dstSet = pathTracingDescSets_[0];
-  descriptorWrites[3].dstBinding = 5;
-  descriptorWrites[3].dstArrayElement = 0;
-  descriptorWrites[3].descriptorType = vk::DescriptorType::eStorageBuffer;
-  descriptorWrites[3].descriptorCount = 1;
-  descriptorWrites[3].pBufferInfo = &meshBVHNodesInfo;
+  descriptorWrites[0].descriptorType = vk::DescriptorType::eAccelerationStructureNV;
 
   logicalDevice_.updateDescriptorSets(descriptorWrites);
   // We need to rerecord command buffers once we update descriptor sets.
@@ -527,12 +514,21 @@ void RendererRTX::recordCommandBuffers() {
     mainCmdBuffers_[i].begin(beginInfo);
 
     // Compute shader.
-    mainCmdBuffers_[i].bindPipeline(vk::PipelineBindPoint::eCompute, pathTracingPipeline_);
+    mainCmdBuffers_[i].bindPipeline(vk::PipelineBindPoint::eRayTracingNV, pathTracingPipeline_);
     mainCmdBuffers_[i].bindDescriptorSets(
-      vk::PipelineBindPoint::eCompute, pathTracingPipelineLayoutData_.layout, 0,
+      vk::PipelineBindPoint::eRayTracingNV, pathTracingPipelineLayoutData_.layout, 0,
       std::vector<vk::DescriptorSet>(pathTracingDescSets_.begin(), pathTracingDescSets_.end()));
-    mainCmdBuffers_[i].dispatch(static_cast<uint32_t>(std::ceil(swapchainImageExtent_.width / float(32))),
-                                static_cast<uint32_t>(std::ceil(swapchainImageExtent_.height / float(32))), 1);
+
+    // Calculate shader binding offsets, which is pretty straight forward in our example
+    VkDeviceSize bindingOffsetRayGenShader = rayTracingProperties_.shaderGroupHandleSize * kIndexRaygen;
+    VkDeviceSize bindingOffsetMissShader = rayTracingProperties_.shaderGroupHandleSize * kIndexMiss;
+    VkDeviceSize bindingOffsetHitShader = rayTracingProperties_.shaderGroupHandleSize * kIndexClosestHit;
+    VkDeviceSize bindingStride = rayTracingProperties_.shaderGroupHandleSize;
+
+    mainCmdBuffers_[i].traceRaysNV(shaderBindingTable_, bindingOffsetRayGenShader, shaderBindingTable_,
+                                   bindingOffsetMissShader, bindingStride, shaderBindingTable_, bindingOffsetHitShader,
+                                   bindingStride, nullptr, 0, 0, swapchainImageExtent_.width,
+                                   swapchainImageExtent_.height, 1);
 
     vk::ImageMemoryBarrier imageMemoryBarrier;
     imageMemoryBarrier.srcAccessMask = vk::AccessFlagBits::eShaderWrite;

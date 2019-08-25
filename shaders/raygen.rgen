@@ -1,0 +1,62 @@
+#version 460
+#extension GL_NV_ray_tracing : require
+#extension GL_GOOGLE_include_directive : require
+
+struct Camera {
+    mat4 worldMatrix;
+    float fovY;
+};
+
+layout(set = 0, binding = 0, rgba32f) uniform image2D accumulationImage;
+
+layout (std140, set = 0, binding = 1) uniform UBO {
+    Camera camera;
+    uint sampleCount;
+} ubo;
+
+layout(set = 0, binding = 2) uniform accelerationStructureNV accelerator;
+
+layout(location = 0) rayPayloadNV vec3 hitValue;
+
+#include "ray.h"
+#include "random.h"
+
+Ray generateRay(vec2 resolution) {
+    vec2 jitter;
+
+    float r1 = 2.0 * rand();
+    float r2 = 2.0 * rand();
+
+    jitter.x = r1 < 1.0 ? sqrt(r1) - 1.0 : 1.0 - sqrt(2.0 - r1);
+    jitter.y = r2 < 1.0 ? sqrt(r2) - 1.0 : 1.0 - sqrt(2.0 - r2);
+    jitter /= (resolution * 0.5);
+
+    vec2 uv = 2.0 * vec2(gl_LaunchIDNV.xy) / vec2(resolution.x, resolution.y) - 1.0 + jitter;
+    vec3 origin = ubo.camera.worldMatrix[3].xyz;
+
+    float aspectRatio = resolution.x / resolution.y;
+    uv.x *= aspectRatio * tan(ubo.camera.fovY / 2.0);
+    uv.y *= tan(ubo.camera.fovY / 2);
+
+    vec3 rayDir = normalize(uv.x * ubo.camera.worldMatrix[0].xyz + uv.y * ubo.camera.worldMatrix[1].xyz - ubo.camera.worldMatrix[2].xyz);
+
+return Ray(vec3(0.0f), vec3(1.0f));
+    return Ray(origin, rayDir);
+}
+
+void main() {
+    vec2 resolution = imageSize(accumulationImage);
+    seed = uvec2((ubo.sampleCount, ubo.sampleCount + 1) * gl_LaunchIDNV.xy);
+
+    Ray ray = generateRay(resolution);
+
+    uint rayFlags = gl_RayFlagsOpaqueNV;
+    uint cullMask = 0x00;
+    float tmin = 0.001;
+    float tmax = 10000.0;
+    uint a = ubo.sampleCount;
+
+    traceNV(accelerator, rayFlags, cullMask, 0, 0, 0, ray.origin, tmin, ray.direction, tmax, 0);
+
+    imageStore(accumulationImage, ivec2(gl_LaunchIDNV.xy), vec4(hitValue, 0.0));
+}

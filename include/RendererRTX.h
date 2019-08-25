@@ -2,14 +2,8 @@
 #define LOGIPATHTRACER_RENDERERRTX_H
 
 #include <lsg/lsg.h>
+#include "RTXSceneConverter.hpp"
 #include "RendererCore.hpp"
-#include "SceneGPUConverter.hpp"
-
-struct Texture {
-  logi::VMAImage image;
-  logi::ImageView imageView;
-  logi::Sampler sampler;
-};
 
 struct VkGeometryInstance {
   float transform[12];
@@ -22,6 +16,12 @@ struct VkGeometryInstance {
 
 class RendererRTX : public RendererCore {
  public:
+  struct Texture {
+    logi::VMAImage image;
+    logi::ImageView imageView;
+    logi::Sampler sampler;
+  };
+
   RendererRTX(const cppglfw::Window& window, const RendererConfiguration& configuration);
 
   void loadScene(const lsg::Ref<lsg::Scene>& scene);
@@ -36,6 +36,8 @@ class RendererRTX : public RendererCore {
   void createTexViewerPipeline();
 
   void createPathTracingPipeline();
+
+  void createShaderBindingTable();
 
   void initializeAccumulationTexture();
 
@@ -58,6 +60,10 @@ class RendererRTX : public RendererCore {
   void postDraw() override;
 
  private:
+  static constexpr uint32_t kIndexRaygen = 0u;
+  static constexpr uint32_t kIndexMiss = 1u;
+  static constexpr uint32_t kIndexClosestHit = 2u;
+
   struct CameraGPU {
     glm::mat4 worldMatrix;
     float fovY;
@@ -68,6 +74,8 @@ class RendererRTX : public RendererCore {
     CameraGPU camera;
     uint32_t sampleCount = 0;
   };
+
+  vk::PhysicalDeviceRayTracingPropertiesNV rayTracingProperties_;
 
   logi::DescriptorPool descriptorPool_;
   logi::MemoryAllocator allocator_;
@@ -83,16 +91,16 @@ class RendererRTX : public RendererCore {
   PipelineLayoutData pathTracingPipelineLayoutData_;
   logi::Pipeline pathTracingPipeline_;
   std::vector<logi::DescriptorSet> pathTracingDescSets_;
+  logi::VMABuffer shaderBindingTable_;
 
   Texture accumulationTexture_;
 
   PathTracerUBO ubo_;
   logi::VMABuffer uboBuffer_;
 
+  RTXSceneConverter sceneConverter_;
   std::atomic<bool> sceneLoaded_ = false;
   lsg::Ref<lsg::Transform> selectedCameraTransform_;
-  SceneGPUConverter sceneConverter_;
-  logi::VMABuffer sceneBuffer_;
 };
 
 #endif // LOGIPATHTRACER_RENDERERRTX_H

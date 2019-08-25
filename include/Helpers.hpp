@@ -1,0 +1,8 @@
+//
+// Created by primoz on 25. 08. 19.
+//
+
+#ifndef LOGIPATHTRACER_HELPERS_HPP
+#define LOGIPATHTRACER_HELPERS_HPP
+
+#endif // LOGIPATHTRACER_HELPERS_HPP
