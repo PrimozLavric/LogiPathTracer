@@ -9,7 +9,6 @@
 #include "heitz_microfacet.h"
 #include "constants.h"
 
-
 precision highp float;
 
 #define WORKGROUP_SIZE 32
@@ -99,7 +98,6 @@ layout(std430, set = 0, binding = 5) buffer TrianglesBVHBuffer {
     BVHNode meshBVHNodes[];
 };
 
-
 Ray generateRay(vec2 resolution) {
     vec2 jitter;
 
@@ -150,9 +148,9 @@ void objectIntersect(Ray ray, uint objectIndex, inout Intersection intersection)
                 for (uint i = meshBVHNodes[offsetIdx].indices.x; i < meshBVHNodes[offsetIdx].indices.y; i++) {
                     uint firstVertexIdx = verticesOffset + 3 * i;
 
-                    if (prevPrimitive == firstVertexIdx) {
+                    /* if (prevPrimitive == firstVertexIdx) {
                         continue;
-                    }
+                    }*/
 
                     float triDistance = rayTriangleIntersect(rayObjSpace, vertices[firstVertexIdx].position, vertices[firstVertexIdx + 1].position, vertices[firstVertexIdx + 2].position);
 
@@ -172,6 +170,7 @@ void objectIntersect(Ray ray, uint objectIndex, inout Intersection intersection)
         idx = traversalStack[--ptr];
     }
 }
+
 
 Intersection sceneIntersect(Ray ray) {
     Intersection intersection;
@@ -210,6 +209,7 @@ Intersection sceneIntersect(Ray ray) {
 
     return intersection;
 }
+
 
 uint determineInteractionType(float roughnessFactor, float metallicFactor, float transmissionFactor) {
     float metallicBRDF   = metallicFactor;
@@ -261,7 +261,7 @@ vec3 traceRay(Ray ray) {
         uint interaction = determineInteractionType(roughnessFactor, metallicFactor, transmissionFactor);
 
         // Apple emission.
-        accColor += mask * emissionFactor * 20.0f;
+        accColor += mask * emissionFactor * 10.0f;
 
         // Compute intersection position and normal
         Ray rayObjSpace;
@@ -271,7 +271,6 @@ vec3 traceRay(Ray ray) {
         vec3 isectPositionWorld = ray.origin + isect.distance * ray.direction;
         vec3 bary = barycentricCoord(rayObjSpace.origin + isect.distance * rayObjSpace.direction, vertices[isect.primitiveIndex].position, vertices[isect.primitiveIndex + 1].position, vertices[isect.primitiveIndex + 2].position);
         vec3 normal = normalize(mat3(objects[isect.objectIndex].worldMatrix) * (bary.x * vertices[isect.primitiveIndex].normal + bary.y * vertices[isect.primitiveIndex + 1].normal + bary.z * vertices[isect.primitiveIndex + 2].normal));
-
 
         vec3 ffNormal = (dot(normal, ray.direction) < 0.0f) ? normal : normal * -1.0f;// front facing normal
         vec3 u = normalize(cross((abs(ffNormal.x) > 0.1f ? vec3(0.0f, 1.0f, 0.0f) : vec3(1.0f, 0.0f, 0.0f)), ffNormal));
@@ -284,21 +283,17 @@ vec3 traceRay(Ray ray) {
         viewDir.z = dot(-ray.direction, ffNormal);
 
         if (interaction == kDiff) {
-            mask *= DiffuseBSDF(SRGBToLinear(baseColorFactor.xyz), viewDir, roughnessFactor, lightDir);
+            mask *= DiffuseBSDF(baseColorFactor.xyz, viewDir, roughnessFactor, lightDir);
         } else if (interaction == kSpec) {
-            mask *= ConductorBRDF(SRGBToLinear(baseColorFactor.xyz), viewDir, roughnessFactor, lightDir);
+            mask *= ConductorBRDF(baseColorFactor.xyz, viewDir, roughnessFactor, lightDir);
         } else if (interaction == kTrans) {
-            mask *= DielectricBSDF(SRGBToLinear(baseColorFactor.xyz), viewDir, roughnessFactor, transmissionFactor, ior, lightDir);
+            bool outside = dot(normal, -ray.direction) > 0.0f;
+            mask *= DielectricBSDF(baseColorFactor.xyz, viewDir, roughnessFactor, transmissionFactor, ior, lightDir, outside);
         }
-
 
         lightDir = lightDir.x * u + lightDir.y * v + lightDir.z * ffNormal;
 
-        if (dot(normal, ffNormal) > 0.0f) {
-            ray.origin = isectPositionWorld;
-        } else {
-            ray.origin = isectPositionWorld;
-        }
+        ray.origin = isectPositionWorld;
         ray.direction = lightDir;
 
         if (length(mask) < 0.5 && bounce > RUSSIAN_ROULETTE_BOUNCES) {

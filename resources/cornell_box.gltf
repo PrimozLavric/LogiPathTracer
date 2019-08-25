@@ -161,8 +161,8 @@
             "mesh" : 10,
             "name" : "Cube",
             "scale" : [
-                0.011734774336218834,
-                1,
+                0.031734774336218834,
+                0.99,
                 0.19774097204208374
             ],
             "translation" : [
@@ -235,8 +235,8 @@
                     0.027210915461182594,
                     1
                 ],
-                "metallicFactor" : 0,
-                "roughnessFactor" : 1
+                "metallicFactor" : 1,
+                "roughnessFactor" : 0.1
             }
         },
         {
@@ -250,7 +250,7 @@
                     1
                 ],
                 "metallicFactor" : 0,
-                "roughnessFactor" : 1
+                "roughnessFactor" : 0.1
             }
         },
         {
@@ -263,9 +263,15 @@
                     1,
                     1
                 ],
-                "metallicFactor" : 1,
-                "roughnessFactor" : 0
-            }
+                "metallicFactor" : 0,
+                "roughnessFactor" : 0.2
+            },
+                          "extensions": {
+                                 "ADOBE_materials_thin_transparency": {
+                                   "transmissionFactor": 1.0,
+                                   "ior": 1.309
+                                 }
+                              }
         },
         {
             "doubleSided" : true,
@@ -282,9 +288,9 @@
             "name" : "Material",
             "pbrMetallicRoughness" : {
                 "baseColorFactor" : [
-                    0.46179822087287903,
-                    0.5235022902488708,
-                    0.8000000715255737,
+                    0.788,
+                    0.898,
+                    0.992,
                     1
                 ],
                 "metallicFactor" : 0,

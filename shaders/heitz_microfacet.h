@@ -3,7 +3,7 @@
 
 #include "constants.h"
 
-#define HEITZ_CONDUCTOR_MAX_ORDER 3
+#define HEITZ_MAX_ORDER 3
 
 float Fresnel(const float vdoth, const float eta) {
   const float cos_theta_t2 = 1.0f - (1.0f - vdoth * vdoth) / (eta * eta);
@@ -113,13 +113,14 @@ vec3 ConductorBRDF(vec3 F0, vec3 viewDir, float roughness, out vec3 lightDir) {
 
   // Random walk
   int order = 0;
-  while (order <= HEITZ_CONDUCTOR_MAX_ORDER) {
+  while (order < HEITZ_MAX_ORDER) {
     // Next height
     height = SampleGGXHeight(lightDir, height, alpha);
 
     // Left the microsurface?
-    if (height > 0.0f)
+    if (height > 0.0f) {
       break;
+    }
 
     // Next direction, plus weight
     vec3 weight;
@@ -134,74 +135,66 @@ vec3 ConductorBRDF(vec3 F0, vec3 viewDir, float roughness, out vec3 lightDir) {
   return energy;
 }
 
-vec3 SampleDielectricPhaseFunction(vec3 viewDir, float alpha, float eta, out bool outside) {
+vec3 SampleDielectricPhaseFunction(vec3 viewDir, float alpha, float eta, inout bool outside) {
   // Generate micro normal according to the distribution of visible normals
-  vec3 microNormal = SampleGGXVNDF(viewDir, alpha);
+  vec3 microNormal = (outside) ? SampleGGXVNDF(viewDir, alpha) : -SampleGGXVNDF(-viewDir, alpha);
 
-  // In some cases, the dot product can go slightly out of the expected
-  // [0, 1] range, due to floating point imprecision
   float vdoth = dot(viewDir, microNormal);
-  vdoth = clamp(vdoth, 0.0f, 1.0f);
 
   // Schlick Fresnel factor
   float F = Fresnel(vdoth, eta);
 
-  if (true || rand() < F) {
+  if (rand() < F) {
     // Reflect
-    outside = true;
     vec3 reflDir = 2.0f * microNormal * vdoth - viewDir;
     return reflDir;
   } else {
     // Refract
-    outside = false;
-    vec3 refrDir = refract(viewDir, -microNormal, eta); // refractEta(viewDir, microNormal, eta);
-    return normalize(refrDir);
+    outside = !outside;
+    return normalize(refractEta(viewDir, microNormal, eta));
   }
 }
 
-vec3 DielectricBSDF(vec3 F0, vec3 viewDir, float roughness, float transmittance, float ior, out vec3 lightDir) {
+vec3 DielectricBSDF(vec3 F0, vec3 viewDir, float roughness, float transmittance, float ior, out vec3 lightDir,
+                    bool outside) {
   float alpha = roughness * roughness;
   vec3 energy = vec3(1.0f);
-  bool outside = true;
 
   // Init
   lightDir = -viewDir;
   float height = 0.0f;
 
+  // vec3 microNormal = SampleGGXVNDF(lightDir, alpha);
+  // lightDir = SampleDielectricPhaseFunction(-lightDir, alpha, (outside ? ior : 1.0f / ior), outside);
+  // return vec3(1.0f);
+
   // Random walk
   int order = 0;
-  while (order <= HEITZ_CONDUCTOR_MAX_ORDER) {
+  while (order < HEITZ_MAX_ORDER) {
     // Next height
-    if (true || outside) {
+    if (outside) {
       height = SampleGGXHeight(lightDir, height, alpha);
 
       // Left the microsurface?
       if (height > 0.0f) {
         break;
       }
-
-      // Next direction, plus weight
-      lightDir = SampleDielectricPhaseFunction(-lightDir, alpha, (outside ? ior : 1.0f / ior), outside);
     } else {
-      // TODO: Is it negative?
       height = -SampleGGXHeight(-lightDir, -height, alpha);
 
       // Left the microsurface?
       if (height < 0.0f) {
         break;
       }
-
-      // Next direction, plus weight
-      lightDir = SampleDielectricPhaseFunction(-lightDir, alpha, (outside ? ior : 1.0f / ior), outside);
     }
 
-    // Update energy throughput
-    // energy *= F0;
+    // Next direction, plus weight
+    lightDir = SampleDielectricPhaseFunction(-lightDir, alpha, (outside ? ior : 1.0f / ior), outside);
 
     order++;
   }
 
-  return vec3(1.0);
+  return F0;
 }
 
 vec3 SampleDiffusePhaseFunction(vec3 viewDir, float alpha) {
@@ -244,7 +237,7 @@ vec3 DiffuseBSDF(vec3 F0, vec3 viewDir, float roughness, out vec3 lightDir) {
 
   // Random walk
   int order = 0;
-  while (order <= HEITZ_CONDUCTOR_MAX_ORDER) {
+  while (order < HEITZ_MAX_ORDER) {
     // Next height
     height = SampleGGXHeight(lightDir, height, alpha);
 
@@ -262,7 +255,7 @@ vec3 DiffuseBSDF(vec3 F0, vec3 viewDir, float roughness, out vec3 lightDir) {
     order++;
   }
 
-  if (order > HEITZ_CONDUCTOR_MAX_ORDER) {
+  if (order >= HEITZ_MAX_ORDER) {
     lightDir = vec3(0.0f, 0.0f, 1.0f);
     return vec3(0.0f);
   }
