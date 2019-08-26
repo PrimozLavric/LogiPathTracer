@@ -21,7 +21,7 @@ layout(location = 0) rayPayloadNV vec3 hitValue;
 #include "ray.h"
 #include "random.h"
 
-Ray generateRay(vec2 resolution) {
+Ray generateRay() {
     vec2 jitter;
 
     float r1 = 2.0 * rand();
@@ -29,18 +29,17 @@ Ray generateRay(vec2 resolution) {
 
     jitter.x = r1 < 1.0 ? sqrt(r1) - 1.0 : 1.0 - sqrt(2.0 - r1);
     jitter.y = r2 < 1.0 ? sqrt(r2) - 1.0 : 1.0 - sqrt(2.0 - r2);
-    jitter /= (resolution * 0.5);
+    jitter /= (gl_LaunchSizeNV.xy * 0.5);
 
-    vec2 uv = 2.0 * vec2(gl_LaunchIDNV.xy) / vec2(resolution.x, resolution.y) - 1.0 + jitter;
+    vec2 uv = 2.0 * vec2(gl_LaunchIDNV.xy) / vec2(gl_LaunchSizeNV.xy) - 1.0 + jitter;
     vec3 origin = ubo.camera.worldMatrix[3].xyz;
 
-    float aspectRatio = resolution.x / resolution.y;
+    float aspectRatio = gl_LaunchSizeNV.x / gl_LaunchSizeNV.y;
     uv.x *= aspectRatio * tan(ubo.camera.fovY / 2.0);
     uv.y *= tan(ubo.camera.fovY / 2);
 
     vec3 rayDir = normalize(uv.x * ubo.camera.worldMatrix[0].xyz + uv.y * ubo.camera.worldMatrix[1].xyz - ubo.camera.worldMatrix[2].xyz);
 
-return Ray(vec3(0.0f), vec3(1.0f));
     return Ray(origin, rayDir);
 }
 
@@ -48,10 +47,10 @@ void main() {
     vec2 resolution = imageSize(accumulationImage);
     seed = uvec2((ubo.sampleCount, ubo.sampleCount + 1) * gl_LaunchIDNV.xy);
 
-    Ray ray = generateRay(resolution);
+    Ray ray = generateRay();
 
     uint rayFlags = gl_RayFlagsOpaqueNV;
-    uint cullMask = 0x00;
+    uint cullMask = 0xff;
     float tmin = 0.001;
     float tmax = 10000.0;
     uint a = ubo.sampleCount;

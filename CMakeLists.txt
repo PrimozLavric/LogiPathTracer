@@ -5,6 +5,9 @@ set(CMAKE_CXX_STANDARD 17)
 # Metadata
 project(LogiPathTracer VERSION 0.1.0 LANGUAGES CXX)
 
+set(MSVC_COMPILE_FLAGS "/MP")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${MSVC_COMPILE_FLAGS}" )
+
 include(${PROJECT_SOURCE_DIR}/cmake_modules/CompileShaders.cmake)
 
 # Add path to CMake custom modules.

@@ -5,7 +5,7 @@
 #include <utility>
 
 struct RTXGeometryInstance {
-  glm::mat4x3 transform;
+  glm::mat3x4 transform;
   uint32_t instanceId : 24;
   uint32_t mask : 8;
   uint32_t instanceOffset : 24;
@@ -43,7 +43,13 @@ void RTXSceneConverter::loadScene(const lsg::Ref<lsg::Scene>& scene) {
   std::vector<RTXGeometryInstance> instances(rtMeshes_.size());
   for (uint64_t i = 0; i < rtMeshes_.size(); i++) {
     RTXGeometryInstance& instance = instances[i];
-    instance.transform = rtMeshes_[i].transform;
+    instance.transform = {
+      1.0f, 0.0f, 0.0f, 0.0f,
+      0.0f, 1.0f, 0.0f, 5.0f,
+      0.0f, 0.0f, 1.0f, 0.0f,
+    };
+
+    //glm::mat()//rtMeshes_[i].transform;
     instance.instanceId = static_cast<uint32_t>(i);
     instance.mask = 0xff;
     instance.instanceOffset = 0;
@@ -55,7 +61,7 @@ void RTXSceneConverter::loadScene(const lsg::Ref<lsg::Scene>& scene) {
     copyToGPU(instances.data(), instances.size() * sizeof(RTXGeometryInstance), vk::BufferUsageFlagBits::eRayTracingNV);
 
   tlas_ =
-    createAccelerationStructure(vk::AccelerationStructureTypeNV::eTopLevel, {}, instances.size(), instancesBuffer);
+    createAccelerationStructure(vk::AccelerationStructureTypeNV::eTopLevel, {}, instances.size() * sizeof(RTXGeometryInstance), instancesBuffer);
 
   instancesBuffer.destroy();
 }
@@ -128,11 +134,13 @@ logi::VMABuffer RTXSceneConverter::copyToGPU(void* data, size_t size, const vk::
 
   vk::BufferCreateInfo stagingBufferInfo;
   stagingBufferInfo.size = size;
-  stagingBufferInfo.usage = vk::BufferUsageFlagBits::eTransferSrc;
+  stagingBufferInfo.usage = usageFlags | vk::BufferUsageFlagBits::eTransferSrc;
   stagingBufferInfo.sharingMode = vk::SharingMode::eExclusive;
 
   logi::VMABuffer stagingBuffer = allocator_.createBuffer(stagingBufferInfo, stagingBufferAllocationInfo);
   stagingBuffer.writeToBuffer(data, size);
+
+  return stagingBuffer;//TODO
 
   // Allocate dedicated GPU buffer.
   VmaAllocationCreateInfo gpuBufferAllocationInfo = {};
@@ -222,6 +230,12 @@ logi::VMAAccelerationStructureNV
 
   cmdBuffer.buildAccelerationStructureNV(accelerationStructureInfo, instance_buffer, 0, false, accelerationStructure,
                                          nullptr, scratchBuffer, 0);
+
+  vk::MemoryBarrier memoryBarrier;
+  memoryBarrier.srcAccessMask = vk::AccessFlagBits::eAccelerationStructureReadNV | vk::AccessFlagBits::eAccelerationStructureWriteNV;
+  memoryBarrier.dstAccessMask = vk::AccessFlagBits::eAccelerationStructureReadNV | vk::AccessFlagBits::eAccelerationStructureWriteNV;
+
+  cmdBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eAccelerationStructureBuildNV, vk::PipelineStageFlagBits::eAccelerationStructureBuildNV, {}, memoryBarrier, {}, {});
 
   cmdBuffer.end();
 

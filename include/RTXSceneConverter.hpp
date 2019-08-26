@@ -11,7 +11,7 @@
 struct RTMesh {
   RTMesh() = default;
 
-  glm::mat3x4 transform;
+  glm::mat4x3 transform;
   vk::IndexType indexType = vk::IndexType::eNoneNV;
   logi::VMABuffer indices;
   logi::VMABuffer vertices;
