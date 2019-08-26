@@ -1,5 +1,6 @@
 macro(compile_shaders target_name shaders_path)
 
+
     file(GLOB_RECURSE GLSL_SOURCE_FILES
             "${shaders_path}/*.frag"
             "${shaders_path}/*.vert"
@@ -10,11 +11,14 @@ macro(compile_shaders target_name shaders_path)
             )
 
     foreach (GLSL ${GLSL_SOURCE_FILES})
+        get_filename_component(GLSL_SUBDIR ${GLSL} DIRECTORY)
+        file(RELATIVE_PATH GLSL_SUBDIR ${CMAKE_CURRENT_SOURCE_DIR}/${shaders_path} ${GLSL_SUBDIR})
+
         get_filename_component(FILE_NAME ${GLSL} NAME)
-        set(SPIRV "${CMAKE_CURRENT_BINARY_DIR}/${shaders_path}/${FILE_NAME}.spv")
+        set(SPIRV "${CMAKE_CURRENT_BINARY_DIR}/${shaders_path}/${GLSL_SUBDIR}/${FILE_NAME}.spv")
         add_custom_command(
                 OUTPUT ${SPIRV}
-                COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/${shaders_path}/"
+                COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/${shaders_path}/${GLSL_SUBDIR}/"
                 COMMAND glslangValidator -V -Od ${GLSL} -o ${SPIRV}
                 DEPENDS ${GLSL})
         list(APPEND SPIRV_BINARY_FILES ${SPIRV})

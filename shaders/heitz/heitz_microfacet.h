@@ -1,7 +1,7 @@
 #ifndef HEITZ_CONDUCTOR_H
 #define HEITZ_CONDUCTOR_H
 
-#include "constants.h"
+#include "../common/constants.h"
 
 #define HEITZ_MAX_ORDER 3
 

@@ -2,12 +2,11 @@
 #extension GL_ARB_separate_shader_objects : enable
 #extension GL_GOOGLE_include_directive : require
 
-#include "test.h"
-#include "random.h"
-#include "util.h"
-#include "ray.h"
-#include "heitz_microfacet.h"
-#include "constants.h"
+#include "common/random.h"
+#include "common/util.h"
+#include "common/ray.h"
+#include "heitz/heitz_microfacet.h"
+#include "common/constants.h"
 
 precision highp float;
 

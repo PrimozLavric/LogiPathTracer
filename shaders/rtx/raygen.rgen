@@ -2,24 +2,11 @@
 #extension GL_NV_ray_tracing : require
 #extension GL_GOOGLE_include_directive : require
 
-struct Camera {
-    mat4 worldMatrix;
-    float fovY;
-};
+#include "../common/ray.h"
+#include "../common/random.h"
+#include "uniforms.h"
 
-layout(set = 0, binding = 0, rgba32f) uniform image2D accumulationImage;
-
-layout (std140, set = 0, binding = 1) uniform UBO {
-    Camera camera;
-    uint sampleCount;
-} ubo;
-
-layout(set = 0, binding = 2) uniform accelerationStructureNV accelerator;
-
-layout(location = 0) rayPayloadNV vec3 hitValue;
-
-#include "ray.h"
-#include "random.h"
+layout(location = 0) rayPayloadNV RayPayload payload;
 
 Ray generateRay() {
     vec2 jitter;
@@ -57,5 +44,5 @@ void main() {
 
     traceNV(accelerator, rayFlags, cullMask, 0, 0, 0, ray.origin, tmin, ray.direction, tmax, 0);
 
-    imageStore(accumulationImage, ivec2(gl_LaunchIDNV.xy), vec4(hitValue, 0.0));
+    imageStore(accumulationImage, ivec2(gl_LaunchIDNV.xy), vec4(payload.mask, 0.0));
 }

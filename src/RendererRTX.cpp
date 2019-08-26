@@ -20,9 +20,9 @@ RendererRTX::RendererRTX(const cppglfw::Window& window, const RendererConfigurat
   texViewerPipelineLayoutData_ =
     loadPipelineShaders({{"shaders/tex_to_quad.vert.spv", "main"}, {"shaders/tex_to_quad.frag.spv", "main"}});
 
-  pathTracingPipelineLayoutData_ = loadPipelineShaders({{"shaders/closesthit.rchit.spv", "main"},
-                                                        {"shaders/miss.rmiss.spv", "main"},
-                                                        {"shaders/raygen.rgen.spv", "main"}});
+  pathTracingPipelineLayoutData_ = loadPipelineShaders({{"shaders/rtx/closesthit.rchit.spv", "main"},
+                                                        {"shaders/rtx/miss.rmiss.spv", "main"},
+                                                        {"shaders/rtx/raygen.rgen.spv", "main"}});
 
   createTexViewerPipeline();
   createPathTracingPipeline();
@@ -483,7 +483,7 @@ void RendererRTX::updateUBOBuffer() {
 
 void RendererRTX::initializeAndBindSceneBuffer() {
   // Update descriptor sets.
-  std::array<vk::WriteDescriptorSet, 1> descriptorWrites;
+  std::array<vk::WriteDescriptorSet, 3> descriptorWrites;
 
   vk::WriteDescriptorSetAccelerationStructureNV descriptorAccelerationStructureInfo;
   descriptorAccelerationStructureInfo.accelerationStructureCount = 1;
@@ -495,6 +495,30 @@ void RendererRTX::initializeAndBindSceneBuffer() {
   descriptorWrites[0].dstBinding = 2;
   descriptorWrites[0].descriptorCount = 1;
   descriptorWrites[0].descriptorType = vk::DescriptorType::eAccelerationStructureNV;
+
+  logi::VMABuffer materialsBuffer = sceneConverter_.getMaterialsBuffer();
+  vk::DescriptorBufferInfo materialsBufferInfo;
+  materialsBufferInfo.buffer = materialsBuffer;
+  materialsBufferInfo.offset = 0;
+  materialsBufferInfo.range = materialsBuffer.size();
+
+  descriptorWrites[1].dstSet = pathTracingDescSets_[0];
+  descriptorWrites[1].dstBinding = 3;
+  descriptorWrites[1].descriptorCount = 1;
+  descriptorWrites[1].descriptorType = vk::DescriptorType::eStorageBuffer;
+  descriptorWrites[1].pBufferInfo = &materialsBufferInfo;
+
+  logi::VMABuffer vertexBuffer = sceneConverter_.getVertexBuffer();
+  vk::DescriptorBufferInfo vertexBufferInfo;
+  vertexBufferInfo.buffer = vertexBuffer;
+  vertexBufferInfo.offset = 0;
+  vertexBufferInfo.range = vertexBuffer.size();
+
+  descriptorWrites[2].dstSet = pathTracingDescSets_[0];
+  descriptorWrites[2].dstBinding = 4;
+  descriptorWrites[2].descriptorCount = 1;
+  descriptorWrites[2].descriptorType = vk::DescriptorType::eStorageBuffer;
+  descriptorWrites[2].pBufferInfo = &vertexBufferInfo;
 
   logicalDevice_.updateDescriptorSets(descriptorWrites);
   // We need to rerecord command buffers once we update descriptor sets.

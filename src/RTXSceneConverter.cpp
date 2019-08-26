@@ -2,16 +2,25 @@
 // Created by primoz on 25. 08. 19.
 //
 #include "RTXSceneConverter.hpp"
+#include <glm/gtx/string_cast.hpp>
 #include <utility>
 
 struct RTXGeometryInstance {
-  glm::mat3x4 transform;
+  glm::mat4x3 transform;
   uint32_t instanceId : 24;
   uint32_t mask : 8;
   uint32_t instanceOffset : 24;
   uint32_t flags : 8;
   uint64_t accelerationStructureHandle;
 };
+
+RTXMaterial::RTXMaterial(const glm::vec4& baseColorFactor, const glm::vec3& emissionFactor, float metallicFactor,
+                         float roughnessFactor, float transmissionFactor, float ior, uint32_t verticesOffset)
+  : baseColorFactor(baseColorFactor), emissionFactor(emissionFactor), metallicFactor(metallicFactor),
+    roughnessFactor(roughnessFactor), transmissionFactor(transmissionFactor), ior(ior), verticesOffset(verticesOffset) {
+}
+
+RTXVertex::RTXVertex(const glm::vec3& normal) : normal(normal) {}
 
 RTXSceneConverter::RTXSceneConverter(logi::MemoryAllocator allocator, logi::CommandPool commandPool,
                                      logi::Queue transferQueue)
@@ -30,10 +39,14 @@ void RTXSceneConverter::loadScene(const lsg::Ref<lsg::Scene>& scene) {
 
     // Fetch transform matrix.
     lsg::Ref<lsg::Transform> transform = obj->getComponent<lsg::Transform>();
-    glm::mat4x3 transformMatrix = (transform) ? glm::mat4x3(transform->worldMatrix()) : glm::mat4x3(1.0f);
+    glm::mat4 wm = transform->worldMatrix();
+    glm::mat4x3 transformMatrix =
+      (transform) ? glm::mat4x3(wm[0][0], wm[1][0], wm[2][0], wm[3][0], wm[0][1], wm[1][1], wm[2][1], wm[3][1],
+                                wm[0][2], wm[1][2], wm[2][2], wm[3][2])
+                  : glm::mat4x3(1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f);
 
-    for (const auto& submesh : mesh->subMeshes()) {
-      loadMesh(submesh, transformMatrix);
+    for (const auto& subMesh : mesh->subMeshes()) {
+      loadMesh(subMesh, transformMatrix);
     }
 
     return true;
@@ -43,13 +56,7 @@ void RTXSceneConverter::loadScene(const lsg::Ref<lsg::Scene>& scene) {
   std::vector<RTXGeometryInstance> instances(rtMeshes_.size());
   for (uint64_t i = 0; i < rtMeshes_.size(); i++) {
     RTXGeometryInstance& instance = instances[i];
-    instance.transform = {
-      1.0f, 0.0f, 0.0f, 0.0f,
-      0.0f, 1.0f, 0.0f, 5.0f,
-      0.0f, 0.0f, 1.0f, 0.0f,
-    };
-
-    //glm::mat()//rtMeshes_[i].transform;
+    instance.transform = rtMeshes_[i].transform;
     instance.instanceId = static_cast<uint32_t>(i);
     instance.mask = 0xff;
     instance.instanceOffset = 0;
@@ -57,13 +64,28 @@ void RTXSceneConverter::loadScene(const lsg::Ref<lsg::Scene>& scene) {
     rtMeshes_[i].blas.getHandleNV<uint64_t>(instance.accelerationStructureHandle);
   }
 
-  logi::VMABuffer instancesBuffer =
-    copyToGPU(instances.data(), instances.size() * sizeof(RTXGeometryInstance), vk::BufferUsageFlagBits::eRayTracingNV);
+  // Allocate staging buffer.
+  VmaAllocationCreateInfo instancesBufferAllocationInfo = {};
+  instancesBufferAllocationInfo.usage = VmaMemoryUsage::VMA_MEMORY_USAGE_CPU_ONLY;
+
+  vk::BufferCreateInfo instancesBufferInfo;
+  instancesBufferInfo.size = instances.size() * sizeof(RTXGeometryInstance);
+  instancesBufferInfo.usage = vk::BufferUsageFlagBits::eRayTracingNV;
+  instancesBufferInfo.sharingMode = vk::SharingMode::eExclusive;
+
+  logi::VMABuffer instancesBuffer = allocator_.createBuffer(instancesBufferInfo, instancesBufferAllocationInfo);
+  instancesBuffer.writeToBuffer(instances.data(), instances.size() * sizeof(RTXGeometryInstance));
 
   tlas_ =
-    createAccelerationStructure(vk::AccelerationStructureTypeNV::eTopLevel, {}, instances.size() * sizeof(RTXGeometryInstance), instancesBuffer);
+    createAccelerationStructure(vk::AccelerationStructureTypeNV::eTopLevel, {}, instances.size(), instancesBuffer);
 
   instancesBuffer.destroy();
+
+  // Copy materials and vertices to buffer
+  verticesBuffer_ =
+    copyToGPU(vertices_.data(), vertices_.size() * sizeof(RTXVertex), vk::BufferUsageFlagBits::eStorageBuffer);
+  materialsBuffer_ =
+    copyToGPU(materials_.data(), materials_.size() * sizeof(RTXMaterial), vk::BufferUsageFlagBits::eStorageBuffer);
 }
 
 const logi::VMAAccelerationStructureNV& RTXSceneConverter::getTopLevelAccelerationStructure() {
@@ -72,11 +94,19 @@ const logi::VMAAccelerationStructureNV& RTXSceneConverter::getTopLevelAccelerati
 
 void RTXSceneConverter::loadMesh(const lsg::Ref<lsg::SubMesh>& subMesh, const glm::mat4x3& worldMatrix) {
   lsg::Ref<lsg::Geometry> geometry = subMesh->geometry();
+  lsg::Ref<lsg::MetallicRoughnessMaterial> material =
+    lsg::dynamicRefCast<lsg::MetallicRoughnessMaterial>(subMesh->material());
 
   // Nothing to do if mesh has no geometry
-  if (!geometry || !geometry->hasVertices()) {
+  if (!geometry || !material || !geometry->hasVertices() || !geometry->hasNormals()) {
+    std::wcerr << "Skipping mesh." << std::endl;
     return;
   }
+
+  // Store material info.
+  materials_.emplace_back(material->baseColorFactor(), material->emissiveFactor(), material->metallicFactor(),
+                          material->roughnessFactor(), material->transmissionFactor(), material->ior(),
+                          vertices_.size());
 
   // BLAS Geometry info
   vk::GeometryNV geometryAS;
@@ -95,11 +125,12 @@ void RTXSceneConverter::loadMesh(const lsg::Ref<lsg::SubMesh>& subMesh, const gl
   geometryAS.geometry.triangles.vertexOffset = 0;
   geometryAS.geometry.triangles.vertexFormat = vk::Format::eR32G32B32Sfloat;
 
-  // Normals
-  if (geometry->hasNormals()) {
-    lsg::TBufferAccessor<glm::vec3> normals = geometry->getNormals();
-    rtMesh.normals = copyToGPU(&normals[0], normals.count() * normals.elementSize(),
-                               vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eRayTracingNV);
+  // Store normals to vertex array.
+  auto normalAccessor = geometry->getTriangleNormalAccessor();
+  for (size_t i = 0; i < normalAccessor->count(); i++) {
+    vertices_.emplace_back((*normalAccessor)[i].a());
+    vertices_.emplace_back((*normalAccessor)[i].b());
+    vertices_.emplace_back((*normalAccessor)[i].c());
   }
 
   // Indices
@@ -140,8 +171,6 @@ logi::VMABuffer RTXSceneConverter::copyToGPU(void* data, size_t size, const vk::
   logi::VMABuffer stagingBuffer = allocator_.createBuffer(stagingBufferInfo, stagingBufferAllocationInfo);
   stagingBuffer.writeToBuffer(data, size);
 
-  return stagingBuffer;//TODO
-
   // Allocate dedicated GPU buffer.
   VmaAllocationCreateInfo gpuBufferAllocationInfo = {};
   gpuBufferAllocationInfo.usage = VmaMemoryUsage::VMA_MEMORY_USAGE_GPU_ONLY;
@@ -175,6 +204,10 @@ logi::VMABuffer RTXSceneConverter::copyToGPU(void* data, size_t size, const vk::
 }
 
 void RTXSceneConverter::reset() {
+  materials_.clear();
+  materialsBuffer_.destroy();
+  vertices_.clear();
+  verticesBuffer_.destroy();
   tlas_.destroy();
 
   for (const auto& mesh : rtMeshes_) {
@@ -232,10 +265,13 @@ logi::VMAAccelerationStructureNV
                                          nullptr, scratchBuffer, 0);
 
   vk::MemoryBarrier memoryBarrier;
-  memoryBarrier.srcAccessMask = vk::AccessFlagBits::eAccelerationStructureReadNV | vk::AccessFlagBits::eAccelerationStructureWriteNV;
-  memoryBarrier.dstAccessMask = vk::AccessFlagBits::eAccelerationStructureReadNV | vk::AccessFlagBits::eAccelerationStructureWriteNV;
+  memoryBarrier.srcAccessMask =
+    vk::AccessFlagBits::eAccelerationStructureReadNV | vk::AccessFlagBits::eAccelerationStructureWriteNV;
+  memoryBarrier.dstAccessMask =
+    vk::AccessFlagBits::eAccelerationStructureReadNV | vk::AccessFlagBits::eAccelerationStructureWriteNV;
 
-  cmdBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eAccelerationStructureBuildNV, vk::PipelineStageFlagBits::eAccelerationStructureBuildNV, {}, memoryBarrier, {}, {});
+  cmdBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eAccelerationStructureBuildNV,
+                            vk::PipelineStageFlagBits::eAccelerationStructureBuildNV, {}, memoryBarrier, {}, {});
 
   cmdBuffer.end();
 
@@ -249,4 +285,12 @@ logi::VMAAccelerationStructureNV
   cmdBuffer.destroy();
 
   return accelerationStructure;
+}
+
+const logi::VMABuffer& RTXSceneConverter::getMaterialsBuffer() const {
+  return materialsBuffer_;
+}
+
+const logi::VMABuffer& RTXSceneConverter::getVertexBuffer() const {
+  return verticesBuffer_;
 }
