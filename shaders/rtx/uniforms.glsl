@@ -5,6 +5,8 @@
 #ifndef LOGIPATHTRACER_RTX_UNIFORMS_H
 #define LOGIPATHTRACER_RTX_UNIFORMS_H
 
+#include "../common/ray.glsl"
+
 struct Camera {
   mat4 worldMatrix;
   float fovY;
@@ -26,6 +28,9 @@ struct Vertex {
 
 struct RayPayload {
   vec3 mask;
+  vec3 accColor;
+  uint depth;
+  uvec2 seed;
 };
 
 layout(set = 0, binding = 0, rgba32f) uniform image2D accumulationImage;
@@ -46,4 +51,4 @@ layout(std430, set = 0, binding = 4) buffer VertexBuffer {
   Vertex vertices[];
 };
 
-#endif // LOGIPATHTRACER_RTX_UNIFORMS_H
+#endif// LOGIPATHTRACER_RTX_UNIFORMS_H

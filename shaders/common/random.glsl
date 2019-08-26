@@ -1,8 +1,10 @@
+#ifndef LOGIPATHTRACER_COMMON_RANDOM_GLSL
+#define LOGIPATHTRACER_COMMON_RANDOM_GLSL
 
-#ifndef RANDOM_H
-#define RANDOM_H
-
+#ifndef RANDOM_SEED_SET
+#define RANDOM_SEED_SET
 uvec2 seed;
+#endif
 
 float rand() {
   seed += uvec2(1);
@@ -12,4 +14,4 @@ float rand() {
   return float(n) * (1.0 / float(0xffffffffU));
 }
 
-#endif
+  #endif// LOGIPATHTRACER_COMMON_RANDOM_GLSL

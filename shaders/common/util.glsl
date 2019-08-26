@@ -1,6 +1,5 @@
-
-#ifndef UTIL_H
-#define UTIL_H
+#ifndef LOGIPATHTRACER_COMMON_UTIL_GLSL
+#define LOGIPATHTRACER_COMMON_UTIL_GLSL
 
 float SRGBToLinear(float srgb) {
   if (srgb <= 0.04045)
@@ -41,4 +40,4 @@ vec3 barycentricCoord(vec3 point, vec3 v0, vec3 v1, vec3 v2) {
   return vec3(u, v, w);
 }
 
-#endif
+#endif // LOGIPATHTRACER_COMMON_UTIL_GLSL
