@@ -6,20 +6,15 @@
 #define LOGIPATHTRACER_RENDERERPT_H
 
 #include <lsg/lsg.h>
+#include "GPUTexture.hpp"
+#include "PTSceneConverter.hpp"
 #include "RendererCore.hpp"
-#include "SceneGPUConverter.hpp"
-
-struct Texture {
-  logi::VMAImage image;
-  logi::ImageView imageView;
-  logi::Sampler sampler;
-};
 
 class RendererPT : public RendererCore {
  public:
   RendererPT(const cppglfw::Window& window, const RendererConfiguration& configuration);
 
-  void loadScene(const lsg::Ref<lsg::Scene>& scene);
+  void loadScene(const lsg::Ref<lsg::Scene>& scene) override;
 
   void drawFrame() override;
 
@@ -79,15 +74,14 @@ class RendererPT : public RendererCore {
   logi::Pipeline pathTracingPipeline_;
   std::vector<logi::DescriptorSet> pathTracingDescSets_;
 
-  Texture accumulationTexture_;
+  GPUTexture accumulationTexture_;
 
   PathTracerUBO ubo_;
   logi::VMABuffer uboBuffer_;
 
   std::atomic<bool> sceneLoaded_ = false;
   lsg::Ref<lsg::Transform> selectedCameraTransform_;
-  SceneGPUConverter sceneConverter_;
-  logi::VMABuffer sceneBuffer_;
+  PTSceneConverter sceneConverter_;
 };
 
 #endif // LOGIPATHTRACER_RENDERERPT_H

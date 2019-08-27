@@ -2,11 +2,15 @@
 #define GLFW_INCLUDE_VULKAN
 #include <cppglfw/CppGLFW.h>
 #include <logi/logi.hpp>
+
+#define LSG_VULKAN
 #include <lsg/lsg.h>
 #include <thread>
 #include <vulkan/vulkan.hpp>
 #include "RendererPT.h"
 #include "RendererRTX.h"
+
+const bool RTX = false;
 
 int main() {
   lsg::GLTFLoader loader;
@@ -26,11 +30,18 @@ int main() {
   cppglfw::Window window = glfwInstance.createWindow("Test", 1024, 768, {{GLFW_CLIENT_API, GLFW_NO_API}});
 
   RendererConfiguration config;
-  config.deviceExtensions.emplace_back("VK_NV_ray_tracing");
-  config.deviceExtensions.emplace_back("VK_KHR_get_memory_requirements2");
-  config.instanceExtensions.emplace_back("VK_KHR_get_physical_device_properties2");
-  RendererRTX renderer(window, config);
-  auto loadThread = std::thread([&]() { renderer.loadScene(scenes[0]); });
+  config.validationLayers.clear();
+  std::unique_ptr<RendererCore> renderer;
+  if (RTX) {
+    config.deviceExtensions.emplace_back("VK_NV_ray_tracing");
+    config.deviceExtensions.emplace_back("VK_KHR_get_memory_requirements2");
+    config.instanceExtensions.emplace_back("VK_KHR_get_physical_device_properties2");
+    renderer = std::make_unique<RendererRTX>(window, config);
+  } else {
+    renderer = std::make_unique<RendererPT>(window, config);
+  }
+
+  auto loadThread = std::thread([&]() { renderer->loadScene(scenes[0]); });
 
   auto currentTime = std::chrono::high_resolution_clock::now();
   decltype(currentTime) previousTime;
@@ -81,7 +92,7 @@ int main() {
     }
 
     glfwInstance.pollEvents();
-    renderer.drawFrame();
+    renderer->drawFrame();
   }
 
   loadThread.join();

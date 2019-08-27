@@ -20,7 +20,7 @@ RTXMaterial::RTXMaterial(const glm::vec4& baseColorFactor, const glm::vec3& emis
     roughnessFactor(roughnessFactor), transmissionFactor(transmissionFactor), ior(ior), verticesOffset(verticesOffset) {
 }
 
-RTXVertex::RTXVertex(const glm::vec3& normal) : normal(normal) {}
+RTXVertex::RTXVertex(const glm::vec3& normal, const glm::vec2& uv) : normal(normal), uv(uv) {}
 
 RTXSceneConverter::RTXSceneConverter(logi::MemoryAllocator allocator, logi::CommandPool commandPool,
                                      logi::Queue transferQueue)
@@ -104,9 +104,20 @@ void RTXSceneConverter::loadMesh(const lsg::Ref<lsg::SubMesh>& subMesh, const gl
   }
 
   // Store material info.
-  materials_.emplace_back(material->baseColorFactor(), material->emissiveFactor(), material->metallicFactor(),
-                          material->roughnessFactor(), material->transmissionFactor(), material->ior(),
-                          vertices_.size());
+  auto& gpuMaterial = materials_.emplace_back(material->baseColorFactor(), material->emissiveFactor(),
+                                              material->metallicFactor(), material->roughnessFactor(),
+                                              material->transmissionFactor(), material->ior(), vertices_.size());
+
+  gpuMaterial.colorTexture =
+    (material->baseColorTex()) ? copyTextureToGPU(material->baseColorTex()) : std::numeric_limits<uint32_t>::max();
+  gpuMaterial.emissionTexture =
+    (material->emissiveTex()) ? copyTextureToGPU(material->emissiveTex()) : std::numeric_limits<uint32_t>::max();
+  gpuMaterial.metallicRoughnessTexture = (material->metallicRoughnessTex())
+                                           ? copyTextureToGPU(material->metallicRoughnessTex())
+                                           : std::numeric_limits<uint32_t>::max();
+  gpuMaterial.metallicRoughnessTexture = (material->transmissionTexture())
+                                           ? copyTextureToGPU(material->transmissionTexture())
+                                           : std::numeric_limits<uint32_t>::max();
 
   // BLAS Geometry info
   vk::GeometryNV geometryAS;
@@ -127,10 +138,20 @@ void RTXSceneConverter::loadMesh(const lsg::Ref<lsg::SubMesh>& subMesh, const gl
 
   // Store normals to vertex array.
   auto normalAccessor = geometry->getTriangleNormalAccessor();
-  for (size_t i = 0; i < normalAccessor->count(); i++) {
-    vertices_.emplace_back((*normalAccessor)[i].a());
-    vertices_.emplace_back((*normalAccessor)[i].b());
-    vertices_.emplace_back((*normalAccessor)[i].c());
+  auto uvAccessor = geometry->hasUv(0u) ? geometry->getTriangleUVAccessor(0u) : nullptr;
+
+  if (uvAccessor) {
+    for (size_t i = 0; i < normalAccessor->count(); i++) {
+      vertices_.emplace_back((*normalAccessor)[i].a(), (*uvAccessor)[i].a());
+      vertices_.emplace_back((*normalAccessor)[i].b(), (*uvAccessor)[i].b());
+      vertices_.emplace_back((*normalAccessor)[i].c(), (*uvAccessor)[i].c());
+    }
+  } else {
+    for (size_t i = 0; i < normalAccessor->count(); i++) {
+      vertices_.emplace_back((*normalAccessor)[i].a());
+      vertices_.emplace_back((*normalAccessor)[i].b());
+      vertices_.emplace_back((*normalAccessor)[i].c());
+    }
   }
 
   // Indices
@@ -203,6 +224,154 @@ logi::VMABuffer RTXSceneConverter::copyToGPU(void* data, size_t size, const vk::
   return gpuBuffer;
 }
 
+uint32_t RTXSceneConverter::copyTextureToGPU(const lsg::Ref<lsg::Texture>& texture) {
+  lsg::Ref<lsg::Image> image = texture->image();
+
+  GPUTexture& gpuTexture = textures_.emplace_back();
+
+  uint64_t imageByteSize = image->pixelSize() * image->height() * image->width();
+
+  logi::CommandBuffer cmdBuffer = commandPool_.allocateCommandBuffer(vk::CommandBufferLevel::ePrimary);
+  cmdBuffer.begin({vk::CommandBufferUsageFlagBits::eOneTimeSubmit});
+
+  // Allocate staging buffer.
+  VmaAllocationCreateInfo stagingBufferAllocationInfo = {};
+  stagingBufferAllocationInfo.usage = VmaMemoryUsage::VMA_MEMORY_USAGE_CPU_TO_GPU;
+
+  vk::BufferCreateInfo stagingBufferInfo;
+  stagingBufferInfo.size = imageByteSize;
+  stagingBufferInfo.usage = vk::BufferUsageFlagBits::eTransferSrc;
+  stagingBufferInfo.sharingMode = vk::SharingMode::eExclusive;
+
+  logi::VMABuffer stagingBuffer = allocator_.createBuffer(stagingBufferInfo, stagingBufferAllocationInfo);
+  stagingBuffer.writeToBuffer(image->rawPixelData(), imageByteSize);
+
+  // Allocate dedicated GPU image.
+  VmaAllocationCreateInfo gpuImageAllocationInfo = {};
+  gpuImageAllocationInfo.usage = VmaMemoryUsage::VMA_MEMORY_USAGE_GPU_ONLY;
+
+  vk::ImageCreateInfo imageInfo;
+  imageInfo.imageType = vk::ImageType::e2D;
+  imageInfo.extent.width = image->width();
+  imageInfo.extent.height = image->height();
+  imageInfo.extent.depth = 1;
+  imageInfo.mipLevels = 1;
+  imageInfo.arrayLayers = 1;
+  imageInfo.format = image->getFormat();
+  imageInfo.tiling = vk::ImageTiling::eOptimal;
+  imageInfo.initialLayout = vk::ImageLayout::eUndefined;
+  imageInfo.usage = vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferDst;
+  imageInfo.samples = vk::SampleCountFlagBits::e1;
+  imageInfo.sharingMode = vk::SharingMode::eExclusive;
+
+  gpuTexture.image = allocator_.createImage(imageInfo, gpuImageAllocationInfo);
+
+  // Transition to DST optimal
+  vk::ImageMemoryBarrier barrierDstOptimal;
+  barrierDstOptimal.oldLayout = vk::ImageLayout::eUndefined;
+  barrierDstOptimal.newLayout = vk::ImageLayout::eTransferDstOptimal;
+  barrierDstOptimal.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  barrierDstOptimal.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  barrierDstOptimal.image = gpuTexture.image;
+  barrierDstOptimal.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+  barrierDstOptimal.subresourceRange.baseMipLevel = 0;
+  barrierDstOptimal.subresourceRange.levelCount = 1;
+  barrierDstOptimal.subresourceRange.baseArrayLayer = 0;
+  barrierDstOptimal.subresourceRange.layerCount = 1;
+  barrierDstOptimal.srcAccessMask = {};
+  barrierDstOptimal.dstAccessMask = vk::AccessFlagBits::eTransferWrite;
+
+  cmdBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eTopOfPipe, vk::PipelineStageFlagBits::eTransfer, {}, {}, {},
+                            barrierDstOptimal);
+
+  // Copy data to texture
+  vk::BufferImageCopy region = {};
+  region.bufferOffset = 0;
+  region.bufferRowLength = 0;
+  region.bufferImageHeight = 0;
+  region.imageSubresource.aspectMask = vk::ImageAspectFlagBits::eColor;
+  region.imageSubresource.mipLevel = 0;
+  region.imageSubresource.baseArrayLayer = 0;
+  region.imageSubresource.layerCount = 1;
+  region.imageOffset = vk::Offset3D();
+  region.imageExtent = vk::Extent3D{static_cast<uint32_t>(image->width()), static_cast<uint32_t>(image->height()), 1};
+
+  cmdBuffer.copyBufferToImage(stagingBuffer, gpuTexture.image, vk::ImageLayout::eTransferDstOptimal, region);
+
+  // Transition to DST optimal
+  vk::ImageMemoryBarrier barrierShaderReadOptimal;
+  barrierShaderReadOptimal.oldLayout = vk::ImageLayout::eTransferDstOptimal;
+  barrierShaderReadOptimal.newLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+  barrierShaderReadOptimal.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  barrierShaderReadOptimal.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  barrierShaderReadOptimal.image = gpuTexture.image;
+  barrierShaderReadOptimal.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+  barrierShaderReadOptimal.subresourceRange.baseMipLevel = 0;
+  barrierShaderReadOptimal.subresourceRange.levelCount = 1;
+  barrierShaderReadOptimal.subresourceRange.baseArrayLayer = 0;
+  barrierShaderReadOptimal.subresourceRange.layerCount = 1;
+  barrierShaderReadOptimal.srcAccessMask = vk::AccessFlagBits::eTransferWrite;
+  barrierShaderReadOptimal.dstAccessMask = vk::AccessFlagBits::eShaderRead;
+
+  cmdBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eComputeShader, {}, {}, {},
+                            barrierShaderReadOptimal);
+
+  cmdBuffer.end();
+
+  vk::SubmitInfo submit_info;
+  submit_info.commandBufferCount = 1;
+  submit_info.pCommandBuffers = &static_cast<const vk::CommandBuffer&>(cmdBuffer);
+  transferQueue_.submit({submit_info});
+  transferQueue_.waitIdle();
+
+  stagingBuffer.destroy();
+  cmdBuffer.destroy();
+
+  // Create image view.
+  gpuTexture.imageView = gpuTexture.image.createImageView(
+    vk::ImageViewCreateFlags(), vk::ImageViewType::e2D, image->getFormat(), vk::ComponentMapping(),
+    vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1));
+
+  lsg::Ref<lsg::Sampler> sampler = texture->sampler();
+
+  if (sampler) {
+    // Create sampler.
+    vk::SamplerCreateInfo samplerInfo;
+    samplerInfo.magFilter = sampler->magFilter();
+    samplerInfo.minFilter = sampler->minFilter();
+    samplerInfo.addressModeU = sampler->wrappingU();
+    samplerInfo.addressModeV = sampler->wrappingW();
+    samplerInfo.addressModeW = sampler->wrappingW();
+    samplerInfo.anisotropyEnable = sampler->enableAnisotropy();
+    samplerInfo.maxAnisotropy = sampler->maxAnisotropy();
+    samplerInfo.borderColor = vk::BorderColor::eFloatOpaqueBlack;
+    samplerInfo.unnormalizedCoordinates = VK_FALSE;
+    samplerInfo.compareEnable = sampler->enableCompare();
+    samplerInfo.compareOp = sampler->compareOp();
+    samplerInfo.mipmapMode = sampler->mipmapMode();
+
+    gpuTexture.sampler = gpuTexture.image.getLogicalDevice().createSampler(samplerInfo);
+  } else {
+    vk::SamplerCreateInfo samplerInfo;
+    samplerInfo.magFilter = vk::Filter::eLinear;
+    samplerInfo.minFilter = vk::Filter::eLinear;
+    samplerInfo.addressModeU = vk::SamplerAddressMode::eRepeat;
+    samplerInfo.addressModeV = vk::SamplerAddressMode::eRepeat;
+    samplerInfo.addressModeW = vk::SamplerAddressMode::eRepeat;
+    samplerInfo.anisotropyEnable = true;
+    samplerInfo.maxAnisotropy = 16;
+    samplerInfo.borderColor = vk::BorderColor::eFloatOpaqueBlack;
+    samplerInfo.unnormalizedCoordinates = VK_FALSE;
+    samplerInfo.compareEnable = sampler->enableCompare();
+    samplerInfo.compareOp = sampler->compareOp();
+    samplerInfo.mipmapMode = sampler->mipmapMode();
+
+    gpuTexture.sampler = gpuTexture.image.getLogicalDevice().createSampler(samplerInfo);
+  }
+
+  return textures_.size() - 1u;
+}
+
 void RTXSceneConverter::reset() {
   materials_.clear();
   materialsBuffer_.destroy();
@@ -213,7 +382,6 @@ void RTXSceneConverter::reset() {
   for (const auto& mesh : rtMeshes_) {
     mesh.blas.destroy();
     mesh.indices.destroy();
-    mesh.normals.destroy();
     mesh.vertices.destroy();
   }
 
@@ -293,4 +461,8 @@ const logi::VMABuffer& RTXSceneConverter::getMaterialsBuffer() const {
 
 const logi::VMABuffer& RTXSceneConverter::getVertexBuffer() const {
   return verticesBuffer_;
+}
+
+const std::vector<GPUTexture>& RTXSceneConverter::getTextures() const {
+  return textures_;
 }

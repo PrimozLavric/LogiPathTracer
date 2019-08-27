@@ -20,19 +20,40 @@ void main() {
   uint vertexOffset = materials[gl_InstanceID].verticesOffset + gl_PrimitiveID * 3;
 
   vec3 normal = normalize(mat3(gl_ObjectToWorldNV) * (bary.x * vertices[vertexOffset].normal + bary.y * vertices[vertexOffset + 1].normal + bary.z * vertices[vertexOffset + 2].normal));
+  vec2 uv = bary.x * vertices[vertexOffset].uv + bary.y * vertices[vertexOffset + 1].uv + bary.z * vertices[vertexOffset + 2].uv;
 
-  vec3 baseColorFactor = materials[gl_InstanceID].baseColorFactor.xyz;
+  vec4 baseColorFactor = materials[gl_InstanceID].baseColorFactor;
   vec3 emissionFactor = materials[gl_InstanceID].emissionFactor;
   float roughnessFactor = max(materials[gl_InstanceID].roughnessFactor, 0.001f);
   float metallicFactor = materials[gl_InstanceID].metallicFactor;
   float transmissionFactor = materials[gl_InstanceID].transmissionFactor;
   float ior = materials[gl_InstanceID].ior;
 
+  // Color texture.
+  if (materials[gl_InstanceID].colorTexture != 0XFFFFFFFF) {
+    baseColorFactor *= texture(textures[materials[gl_InstanceID].colorTexture], uv).xyzw;
+  }
+
+  // Emission texture.
+  if (materials[gl_InstanceID].emissionTexture != 0XFFFFFFFF) {
+    emissionFactor *= texture(textures[materials[gl_InstanceID].emissionTexture], uv).xyz;
+  }
+
+  if (materials[gl_InstanceID].metallicRoughnessTexture != 0XFFFFFFFF) {
+    vec2 metallicRoughnessSample = texture(textures[materials[gl_InstanceID].metallicRoughnessTexture], uv).xy;
+    metallicFactor = metallicRoughnessSample.x;
+    roughnessFactor = metallicRoughnessSample.y;
+  }
+
+  if (materials[gl_InstanceID].transmissionTexture != 0XFFFFFFFF) {
+    transmissionFactor *= texture(textures[materials[gl_InstanceID].transmissionTexture], uv).x;
+  }
+
   // Determine interaction type based on the emission, roughness and metallic and transmission factor.
   uint interaction = determineMicrofacetInteractionType(roughnessFactor, metallicFactor, transmissionFactor);
 
   // Apple emission.
-  payload.accColor += payload.mask * emissionFactor * 10.0f;
+  payload.accColor += payload.mask * emissionFactor;
 
   // Compute orthonormal basis.
   vec3 ffNormal = (dot(normal, gl_WorldRayDirectionNV) < 0.0f) ? normal : normal * -1.0f;

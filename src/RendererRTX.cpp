@@ -483,7 +483,7 @@ void RendererRTX::updateUBOBuffer() {
 
 void RendererRTX::initializeAndBindSceneBuffer() {
   // Update descriptor sets.
-  std::array<vk::WriteDescriptorSet, 3> descriptorWrites;
+  std::vector<vk::WriteDescriptorSet> descriptorWrites(3);
 
   vk::WriteDescriptorSetAccelerationStructureNV descriptorAccelerationStructureInfo;
   descriptorAccelerationStructureInfo.accelerationStructureCount = 1;
@@ -519,6 +519,26 @@ void RendererRTX::initializeAndBindSceneBuffer() {
   descriptorWrites[2].descriptorCount = 1;
   descriptorWrites[2].descriptorType = vk::DescriptorType::eStorageBuffer;
   descriptorWrites[2].pBufferInfo = &vertexBufferInfo;
+
+  const std::vector<GPUTexture>& textures = sceneConverter_.getTextures();
+  std::vector<vk::DescriptorImageInfo> descriptorImageInfos;
+
+  if (!textures.empty()) {
+    for (const auto& texture : textures) {
+      vk::DescriptorImageInfo& descriptorImageInfo = descriptorImageInfos.emplace_back();
+      descriptorImageInfo.imageView = texture.imageView;
+      descriptorImageInfo.sampler = texture.sampler;
+      descriptorImageInfo.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+    }
+
+    vk::WriteDescriptorSet& descriptorWriteTex = descriptorWrites.emplace_back();
+    descriptorWriteTex.dstSet = pathTracingDescSets_[0];
+    descriptorWriteTex.dstBinding = 5;
+    descriptorWriteTex.dstArrayElement = 0;
+    descriptorWriteTex.descriptorType = vk::DescriptorType::eCombinedImageSampler;
+    descriptorWriteTex.descriptorCount = descriptorImageInfos.size();
+    descriptorWriteTex.pImageInfo = descriptorImageInfos.data();
+  }
 
   logicalDevice_.updateDescriptorSets(descriptorWrites);
   // We need to rerecord command buffers once we update descriptor sets.

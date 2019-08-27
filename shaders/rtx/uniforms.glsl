@@ -19,11 +19,16 @@ struct Material {
   float roughnessFactor;
   float transmissionFactor;
   float ior;
+  uint colorTexture;
+  uint emissionTexture;
+  uint metallicRoughnessTexture;
+  uint transmissionTexture;
   uint verticesOffset;
 };
 
 struct Vertex {
   vec3 normal;
+  vec2 uv;
 };
 
 struct RayPayload {
@@ -50,5 +55,7 @@ layout(std430, set = 0, binding = 3) buffer MaterialsBuffer {
 layout(std430, set = 0, binding = 4) buffer VertexBuffer {
   Vertex vertices[];
 };
+
+layout(set = 0, binding = 5) uniform sampler2D textures[256];
 
 #endif// LOGIPATHTRACER_RTX_UNIFORMS_H

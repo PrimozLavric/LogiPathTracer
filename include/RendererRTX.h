@@ -2,6 +2,7 @@
 #define LOGIPATHTRACER_RENDERERRTX_H
 
 #include <lsg/lsg.h>
+#include "GPUTexture.hpp"
 #include "RTXSceneConverter.hpp"
 #include "RendererCore.hpp"
 
@@ -16,15 +17,9 @@ struct VkGeometryInstance {
 
 class RendererRTX : public RendererCore {
  public:
-  struct Texture {
-    logi::VMAImage image;
-    logi::ImageView imageView;
-    logi::Sampler sampler;
-  };
-
   RendererRTX(const cppglfw::Window& window, const RendererConfiguration& configuration);
 
-  void loadScene(const lsg::Ref<lsg::Scene>& scene);
+  void loadScene(const lsg::Ref<lsg::Scene>& scene) override;
 
   void drawFrame() override;
 
@@ -93,7 +88,7 @@ class RendererRTX : public RendererCore {
   std::vector<logi::DescriptorSet> pathTracingDescSets_;
   logi::VMABuffer shaderBindingTable_;
 
-  Texture accumulationTexture_;
+  GPUTexture accumulationTexture_;
 
   PathTracerUBO ubo_;
   logi::VMABuffer uboBuffer_;

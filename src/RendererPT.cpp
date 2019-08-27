@@ -8,9 +8,8 @@
 #include <cmath>
 
 RendererPT::RendererPT(const cppglfw::Window& window, const RendererConfiguration& configuration)
-  : RendererCore(window, configuration) {
-  allocator_ = logicalDevice_.createMemoryAllocator();
-
+  : RendererCore(window, configuration), allocator_(logicalDevice_.createMemoryAllocator()),
+    sceneConverter_(allocator_, graphicsFamilyCmdPool_, graphicsQueue_) {
   createTexViewerRenderPass();
   createFrameBuffers();
 
@@ -25,7 +24,6 @@ RendererPT::RendererPT(const cppglfw::Window& window, const RendererConfiguratio
   initializeDescriptorSets();
   updateAccumulationTexDescriptorSet();
   initializeUBOBuffer();
-  // recordCommandBuffers();
 }
 
 void RendererPT::loadScene(const lsg::Ref<lsg::Scene>& scene) {
@@ -35,7 +33,7 @@ void RendererPT::loadScene(const lsg::Ref<lsg::Scene>& scene) {
   const std::vector<lsg::Ref<lsg::Object>>& cameras = sceneConverter_.getCameras();
   if (cameras.empty()) {
     std::cout << "Loaded scene without cameras." << std::endl;
-    sceneConverter_.clear();
+    sceneConverter_.reset();
   }
 
   selectedCameraTransform_ = sceneConverter_.getCameras()[0]->getComponent<lsg::Transform>();
@@ -311,7 +309,7 @@ void RendererPT::initializeDescriptorSets() {
   static const size_t numPoolSets = 10;
   static const std::vector<vk::DescriptorPoolSize> poolSizes = {
     //{vk::DescriptorType::eSampler, 0},
-    {vk::DescriptorType::eCombinedImageSampler, 1},
+    {vk::DescriptorType::eCombinedImageSampler, 257},
     //{vk::DescriptorType::eSampledImage, 0},
     {vk::DescriptorType::eStorageImage, 1},
     //{vk::DescriptorType::eUniformTexelBuffer, 0},
@@ -405,64 +403,14 @@ void RendererPT::updateUBOBuffer() {
 }
 
 void RendererPT::initializeAndBindSceneBuffer() {
-  // Compute data size.
-  vk::DeviceSize objectDataSize = sceneConverter_.getObjectData().size() * sizeof(GPUObjectData);
-  vk::DeviceSize objectBVHNodesOffset = objectDataSize + (256 - objectDataSize % 256);
-  vk::DeviceSize objectBVHNodesSize = sceneConverter_.getObjectBvhNodes().size() * sizeof(GPUBVHNode);
-  vk::DeviceSize verticesOffset =
-    (objectBVHNodesOffset + objectBVHNodesSize) + (256 - (objectBVHNodesOffset + objectBVHNodesSize) % 256);
-  vk::DeviceSize verticesSize = sceneConverter_.getVertices().size() * sizeof(GPUVertex);
-  vk::DeviceSize meshBVHNodesOffset = (verticesOffset + verticesSize) + (256 - (verticesOffset + verticesSize) % 256);
-  vk::DeviceSize meshBVHNodesSize = sceneConverter_.getMeshBvhNodes().size() * sizeof(GPUBVHNode);
-  vk::DeviceSize bufferSize = meshBVHNodesOffset + meshBVHNodesSize;
-
-  // Allocate staging buffer.
-  VmaAllocationCreateInfo stagingBufferAllocationInfo = {};
-  stagingBufferAllocationInfo.usage = VmaMemoryUsage::VMA_MEMORY_USAGE_CPU_TO_GPU;
-
-  vk::BufferCreateInfo stagingBufferInfo;
-  stagingBufferInfo.size = bufferSize;
-  stagingBufferInfo.usage = vk::BufferUsageFlagBits::eTransferSrc;
-  stagingBufferInfo.sharingMode = vk::SharingMode::eExclusive;
-
-  logi::VMABuffer stagingBuffer = allocator_.createBuffer(stagingBufferInfo, stagingBufferAllocationInfo);
-
-  // Fill staging buffer with scene data.
-  stagingBuffer.writeToBuffer(sceneConverter_.getObjectData().data(), objectDataSize);
-  stagingBuffer.writeToBuffer(sceneConverter_.getObjectBvhNodes().data(), objectBVHNodesSize, objectBVHNodesOffset);
-  stagingBuffer.writeToBuffer(sceneConverter_.getVertices().data(), verticesSize, verticesOffset);
-  stagingBuffer.writeToBuffer(sceneConverter_.getMeshBvhNodes().data(), meshBVHNodesSize, meshBVHNodesOffset);
-
-  // Destroy existing scene buffer.
-  if (sceneBuffer_) {
-    sceneBuffer_.destroy();
-  }
-
-  // Allocate scene buffer on GPU
-  VmaAllocationCreateInfo sceneBufferAllocationInfo = {};
-  sceneBufferAllocationInfo.usage = VmaMemoryUsage::VMA_MEMORY_USAGE_GPU_ONLY;
-
-  vk::BufferCreateInfo sceneBufferInfo;
-  sceneBufferInfo.size = bufferSize;
-  sceneBufferInfo.usage = vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eStorageBuffer;
-  sceneBufferInfo.sharingMode = vk::SharingMode::eExclusive;
-
-  sceneBuffer_ = allocator_.createBuffer(sceneBufferInfo, sceneBufferAllocationInfo);
-
-  // Copy scene data from staging buffer to scene buffer.
-  blockingBufferCopy(stagingBuffer, sceneBuffer_, bufferSize);
-
-  // Destroy staging buffer.
-  stagingBuffer.destroy();
-
   // Update descriptor sets.
-  std::array<vk::WriteDescriptorSet, 4> descriptorWrites;
+  std::vector<vk::WriteDescriptorSet> descriptorWrites(4);
 
   // Object data binding
   vk::DescriptorBufferInfo objectDataBufferInfo;
-  objectDataBufferInfo.buffer = sceneBuffer_;
+  objectDataBufferInfo.buffer = sceneConverter_.getObjectDataBuffer();
   objectDataBufferInfo.offset = 0;
-  objectDataBufferInfo.range = objectDataSize;
+  objectDataBufferInfo.range = sceneConverter_.getObjectDataBuffer().size();
 
   descriptorWrites[0].dstSet = pathTracingDescSets_[0];
   descriptorWrites[0].dstBinding = 2;
@@ -473,9 +421,9 @@ void RendererPT::initializeAndBindSceneBuffer() {
 
   // Object BVH nodes binding
   vk::DescriptorBufferInfo objectBVHNodesInfo;
-  objectBVHNodesInfo.buffer = sceneBuffer_;
-  objectBVHNodesInfo.offset = objectBVHNodesOffset;
-  objectBVHNodesInfo.range = objectBVHNodesSize;
+  objectBVHNodesInfo.buffer = sceneConverter_.getObjectBvhNodesBuffer();
+  objectBVHNodesInfo.offset = 0;
+  objectBVHNodesInfo.range = sceneConverter_.getObjectBvhNodesBuffer().size();
 
   descriptorWrites[1].dstSet = pathTracingDescSets_[0];
   descriptorWrites[1].dstBinding = 3;
@@ -486,9 +434,9 @@ void RendererPT::initializeAndBindSceneBuffer() {
 
   // Vertices binding
   vk::DescriptorBufferInfo verticesInfo;
-  verticesInfo.buffer = sceneBuffer_;
-  verticesInfo.offset = verticesOffset;
-  verticesInfo.range = verticesSize;
+  verticesInfo.buffer = sceneConverter_.getVerticesBuffer();
+  verticesInfo.offset = 0;
+  verticesInfo.range = sceneConverter_.getVerticesBuffer().size();
 
   descriptorWrites[2].dstSet = pathTracingDescSets_[0];
   descriptorWrites[2].dstBinding = 4;
@@ -499,9 +447,9 @@ void RendererPT::initializeAndBindSceneBuffer() {
 
   // Mesh BVH nodes binding
   vk::DescriptorBufferInfo meshBVHNodesInfo;
-  meshBVHNodesInfo.buffer = sceneBuffer_;
-  meshBVHNodesInfo.offset = meshBVHNodesOffset;
-  meshBVHNodesInfo.range = meshBVHNodesSize;
+  meshBVHNodesInfo.buffer = sceneConverter_.getMeshBvhNodesBuffer();
+  meshBVHNodesInfo.offset = 0;
+  meshBVHNodesInfo.range = sceneConverter_.getMeshBvhNodesBuffer().size();
 
   descriptorWrites[3].dstSet = pathTracingDescSets_[0];
   descriptorWrites[3].dstBinding = 5;
@@ -509,6 +457,26 @@ void RendererPT::initializeAndBindSceneBuffer() {
   descriptorWrites[3].descriptorType = vk::DescriptorType::eStorageBuffer;
   descriptorWrites[3].descriptorCount = 1;
   descriptorWrites[3].pBufferInfo = &meshBVHNodesInfo;
+
+  const std::vector<GPUTexture>& textures = sceneConverter_.getTextures();
+  std::vector<vk::DescriptorImageInfo> descriptorImageInfos;
+
+  if (!textures.empty()) {
+    for (const auto& texture : textures) {
+      vk::DescriptorImageInfo& descriptorImageInfo = descriptorImageInfos.emplace_back();
+      descriptorImageInfo.imageView = texture.imageView;
+      descriptorImageInfo.sampler = texture.sampler;
+      descriptorImageInfo.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+    }
+
+    vk::WriteDescriptorSet& descriptorWriteTex = descriptorWrites.emplace_back();
+    descriptorWriteTex.dstSet = pathTracingDescSets_[0];
+    descriptorWriteTex.dstBinding = 6;
+    descriptorWriteTex.dstArrayElement = 0;
+    descriptorWriteTex.descriptorType = vk::DescriptorType::eCombinedImageSampler;
+    descriptorWriteTex.descriptorCount = descriptorImageInfos.size();
+    descriptorWriteTex.pImageInfo = descriptorImageInfos.data();
+  }
 
   logicalDevice_.updateDescriptorSets(descriptorWrites);
   // We need to rerecord command buffers once we update descriptor sets.

@@ -6,6 +6,7 @@
 #include <cppglfw/CppGLFW.h>
 #include <fstream>
 #include <logi/logi.hpp>
+#include <lsg/lsg.h>
 #include <map>
 #include <vector>
 
@@ -45,6 +46,8 @@ class RendererCore {
   explicit RendererCore(cppglfw::Window window, const RendererConfiguration& configuration);
 
   virtual void drawFrame();
+
+  virtual void loadScene(const lsg::Ref<lsg::Scene>& scene) = 0;
 
  protected:
   void createInstance(const std::vector<const char*>& extensions, const std::vector<const char*>& validationLayers);

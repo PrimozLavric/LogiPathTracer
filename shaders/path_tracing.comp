@@ -44,6 +44,10 @@ struct Object {
   float roughnessFactor;// Object's roughness factor (used to determine diffuse component strength).
   float transmissionFactor;
   float ior;
+  uint colorTexture;
+  uint emissionTexture;
+  uint metallicRoughnessTexture;
+  uint transmissionTexture;
   uint bvhOffset;// Byte offset to object's BVH tree.
   uint verticesOffset;// Byte offset to object's vertices.
 };
@@ -51,6 +55,7 @@ struct Object {
 struct Vertex {
   vec3 position;
   vec3 normal;
+  vec2 uv;
 };
 
 struct Intersection {
@@ -91,6 +96,8 @@ layout(std430, set = 0, binding = 4) buffer TrianglesBuffer {
 layout(std430, set = 0, binding = 5) buffer TrianglesBVHBuffer {
   BVHNode meshBVHNodes[];
 };
+
+layout(set = 0, binding = 6) uniform sampler2D textures[256];
 
 Ray generateRay(vec2 resolution) {
   vec2 jitter;
@@ -208,32 +215,57 @@ vec3 traceRay(Ray ray) {
 
     // Missed.
     if (isect.distance == INFINITY) {
+      accColor = mask * 0.2;
       break;
     }
 
-    vec4 baseColorFactor = objects[isect.objectIndex].baseColorFactor;
-    vec3 emissionFactor = objects[isect.objectIndex].emissionFactor;
-    float roughnessFactor = max(objects[isect.objectIndex].roughnessFactor, 0.001f);
-    float metallicFactor = objects[isect.objectIndex].metallicFactor;
-    float transmissionFactor = objects[isect.objectIndex].transmissionFactor;
-    float ior = objects[isect.objectIndex].ior;
+    Object object = objects[isect.objectIndex];
+
+    // Compute intersection position and normal
+    Ray rayObjSpace;
+    rayObjSpace.origin = vec3(object.worldMatrixInverse * vec4(ray.origin, 1));
+    rayObjSpace.direction = mat3(object.worldMatrixInverse) * ray.direction;
+
+    vec3 isectPositionWorld = ray.origin + isect.distance * ray.direction;
+    vec3 bary = barycentricCoord(rayObjSpace.origin + isect.distance * rayObjSpace.direction, vertices[isect.primitiveIndex].position, vertices[isect.primitiveIndex + 1].position, vertices[isect.primitiveIndex + 2].position);
+    vec2 uv = bary.x * vertices[isect.primitiveIndex].uv + bary.y * vertices[isect.primitiveIndex + 1].uv + bary.z * vertices[isect.primitiveIndex + 2].uv;
+
+    vec4 baseColorFactor = object.baseColorFactor;
+    vec3 emissionFactor = object.emissionFactor;
+    float roughnessFactor = max(object.roughnessFactor, 0.001f);
+    float metallicFactor = object.metallicFactor;
+    float transmissionFactor = object.transmissionFactor;
+    float ior = object.ior;
     float opacity = baseColorFactor.w;
+
+    // Color texture.
+    if (object.colorTexture != 0XFFFFFFFF) {
+      baseColorFactor *= texture(textures[object.colorTexture], uv).xyzw;
+    }
+    // Emission texture.
+    if (object.emissionTexture != 0XFFFFFFFF) {
+      emissionFactor *= texture(textures[object.emissionTexture], uv).xyz;
+    }
+
+    if (object.metallicRoughnessTexture != 0XFFFFFFFF) {
+      vec2 metallicRoughnessSample = texture(textures[object.metallicRoughnessTexture], uv).xy;
+      metallicFactor = metallicRoughnessSample.x;
+      roughnessFactor = metallicRoughnessSample.y;
+    }
+
+    if (object.transmissionTexture != 0XFFFFFFFF) {
+      transmissionFactor *= texture(textures[object.transmissionTexture], uv).x;
+    }
+
 
     // Determine interaction type based on the emission, roughness and metalic factor and opacity.
     uint interaction = determineMicrofacetInteractionType(roughnessFactor, metallicFactor, transmissionFactor);
 
-    // Apple emission.
-    accColor += mask * emissionFactor * 10.0f;
+    // Apply emission.
+    accColor += mask * emissionFactor;
 
-    // Compute intersection position and normal
-    Ray rayObjSpace;
-    rayObjSpace.origin = vec3(objects[isect.objectIndex].worldMatrixInverse * vec4(ray.origin, 1));
-    rayObjSpace.direction = mat3(objects[isect.objectIndex].worldMatrixInverse) * ray.direction;
-
-    vec3 isectPositionWorld = ray.origin + isect.distance * ray.direction;
-    vec3 bary = barycentricCoord(rayObjSpace.origin + isect.distance * rayObjSpace.direction, vertices[isect.primitiveIndex].position, vertices[isect.primitiveIndex + 1].position, vertices[isect.primitiveIndex + 2].position);
+    // Compute orthonormal basis
     vec3 normal = normalize(mat3(objects[isect.objectIndex].worldMatrix) * (bary.x * vertices[isect.primitiveIndex].normal + bary.y * vertices[isect.primitiveIndex + 1].normal + bary.z * vertices[isect.primitiveIndex + 2].normal));
-
     vec3 ffNormal = (dot(normal, ray.direction) < 0.0f) ? normal : normal * -1.0f;// front facing normal
     vec3 u = normalize(cross((abs(ffNormal.x) > 0.1f ? vec3(0.0f, 1.0f, 0.0f) : vec3(1.0f, 0.0f, 0.0f)), ffNormal));
     vec3 v = cross(ffNormal, u);

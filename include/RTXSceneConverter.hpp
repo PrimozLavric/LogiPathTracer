@@ -6,7 +6,9 @@
 #define LOGIPATHTRACER_RTX_SCENE_CONVERTER_HPP
 
 #include <logi/logi.hpp>
+#define LSG_VULKAN
 #include <lsg/lsg.h>
+#include "GPUTexture.hpp"
 
 struct RTMesh {
   RTMesh() = default;
@@ -15,7 +17,6 @@ struct RTMesh {
   vk::IndexType indexType = vk::IndexType::eNoneNV;
   logi::VMABuffer indices;
   logi::VMABuffer vertices;
-  logi::VMABuffer normals;
 
   vk::AccelerationStructureInfoNV accelerationStructureInfo;
   logi::VMAAccelerationStructureNV blas;
@@ -31,12 +32,18 @@ struct RTXMaterial {
   float roughnessFactor;
   float transmissionFactor;
   float ior;
+  uint32_t colorTexture = std::numeric_limits<uint32_t>::max();
+  uint32_t emissionTexture = std::numeric_limits<uint32_t>::max();
+  uint32_t metallicRoughnessTexture = std::numeric_limits<uint32_t>::max();
+  uint32_t transmissionTexture = std::numeric_limits<uint32_t>::max();
   uint32_t verticesOffset;
 };
 
 struct RTXVertex {
-  RTXVertex(const glm::vec3& normal);
+  RTXVertex(const glm::vec3& normal, const glm::vec2& uv = {});
+
   alignas(16) glm::vec3 normal;
+  alignas(16) glm::vec2 uv;
 };
 
 class RTXSceneConverter {
@@ -51,10 +58,14 @@ class RTXSceneConverter {
 
   const logi::VMABuffer& getVertexBuffer() const;
 
+  const std::vector<GPUTexture>& getTextures() const;
+
  protected:
   void loadMesh(const lsg::Ref<lsg::SubMesh>& subMesh, const glm::mat4x3& worldMatrix);
 
   logi::VMABuffer copyToGPU(void* data, size_t size, const vk::BufferUsageFlags& usageFlags);
+
+  uint32_t copyTextureToGPU(const lsg::Ref<lsg::Texture>& texture);
 
   void reset();
 
@@ -75,6 +86,7 @@ class RTXSceneConverter {
   logi::VMABuffer verticesBuffer_;
 
   logi::VMAAccelerationStructureNV tlas_;
+  std::vector<GPUTexture> textures_;
 };
 
 #endif // LOGIPATHTRACER_RTX_SCENE_CONVERTER_HPP
