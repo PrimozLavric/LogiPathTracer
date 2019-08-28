@@ -49,6 +49,9 @@ void main() {
     transmissionFactor *= texture(textures[materials[gl_InstanceID].transmissionTexture], uv).x;
   }
 
+  baseColorFactor = SRGBToLinear(baseColorFactor);
+  //emissionFactor = SRGBToLinear(emissionFactor);
+
   // Determine interaction type based on the emission, roughness and metallic and transmission factor.
   uint interaction = determineMicrofacetInteractionType(roughnessFactor, metallicFactor, transmissionFactor);
 

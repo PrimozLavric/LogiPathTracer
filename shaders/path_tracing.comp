@@ -257,6 +257,7 @@ vec3 traceRay(Ray ray) {
       transmissionFactor *= texture(textures[object.transmissionTexture], uv).x;
     }
 
+    baseColorFactor = SRGBToLinear(baseColorFactor);
 
     // Determine interaction type based on the emission, roughness and metalic factor and opacity.
     uint interaction = determineMicrofacetInteractionType(roughnessFactor, metallicFactor, transmissionFactor);

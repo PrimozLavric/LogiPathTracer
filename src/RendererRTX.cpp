@@ -621,8 +621,23 @@ void RendererRTX::preDraw() {
 }
 
 void RendererRTX::postDraw() {
+  static std::chrono::time_point<std::chrono::high_resolution_clock> startTime;
+  if (ubo_.sampleCount == 0) {
+    startTime = std::chrono::high_resolution_clock::now();
+  }
+
   ubo_.sampleCount++;
-  std::cout << "Sample: " << ubo_.sampleCount << std::endl;
+  if (ubo_.sampleCount % 10 == 0) {
+    std::cout << "Sample: " << ubo_.sampleCount << std::endl;
+
+    if (ubo_.sampleCount % 100 == 0) {
+      auto dt =
+        std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - startTime)
+          .count() /
+        1000.0f;
+      std::cout << "Samples per second: " << ubo_.sampleCount / dt << std::endl;
+    }
+  }
 }
 void RendererRTX::drawFrame() {
   if (sceneLoaded_) {
