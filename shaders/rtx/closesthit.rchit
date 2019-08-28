@@ -94,6 +94,7 @@ void main() {
 
   payload.seed = seed;
   if (payload.depth < MAX_TRACE_DEPTH) {
-    traceNV(accelerator, gl_RayFlagsOpaqueNV, 0xff, 0, 0, 0, gl_WorldRayOriginNV + gl_HitTNV * gl_WorldRayDirectionNV + ffNormal * EPS, 0.001, normalize(lightDir), 10000.0, 0);
+    traceNV(accelerator, gl_RayFlagsOpaqueNV, 0xff, 0, 0, 0, gl_WorldRayOriginNV + gl_HitTNV * gl_WorldRayDirectionNV, 0.00001, normalize(lightDir), 10000.0, 0);
+    //traceNV(accelerator, gl_RayFlagsOpaqueNV, 0xff, 0, 0, 0, gl_WorldRayOriginNV + gl_HitTNV * gl_WorldRayDirectionNV + ffNormal * EPS, 0.001, normalize(lightDir), 10000.0, 0);
   }
 }

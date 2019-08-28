@@ -23,7 +23,7 @@ Ray generateRay() {
 
   float aspectRatio = gl_LaunchSizeNV.x / gl_LaunchSizeNV.y;
   uv.x *= aspectRatio * tan(ubo.camera.fovY / 2.0);
-  uv.y *= tan(ubo.camera.fovY / 2);
+  uv.y *= tan(ubo.camera.fovY / 2.0);
 
   vec3 rayDir = normalize(uv.x * ubo.camera.worldMatrix[0].xyz + uv.y * ubo.camera.worldMatrix[1].xyz - ubo.camera.worldMatrix[2].xyz);
 

@@ -249,7 +249,7 @@ void RendererPT::initializeAccumulationTexture() {
   imageInfo.sharingMode = vk::SharingMode::eExclusive;
   // Set initial layout of the image to undefined
   imageInfo.initialLayout = vk::ImageLayout::eUndefined;
-  imageInfo.extent = vk::Extent3D(swapchainImageExtent_, 1);
+  imageInfo.extent = vk::Extent3D(swapchainImageExtent_.width, swapchainImageExtent_.height, 1);
   imageInfo.usage = vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eSampled;
 
   accumulationTexture_.image = allocator_.createImage(imageInfo, allocationInfo);

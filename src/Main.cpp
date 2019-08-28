@@ -10,11 +10,11 @@
 #include "RendererPT.h"
 #include "RendererRTX.h"
 
-const bool RTX = false;
+const bool RTX = true;
 
 int main() {
   lsg::GLTFLoader loader;
-  std::vector<lsg::Ref<lsg::Scene>> scenes = loader.load("./resources/Sponza/sponza.gltf");
+  std::vector<lsg::Ref<lsg::Scene>> scenes = loader.load("./resources/cornell_box.gltf");
 
   lsg::Ref<lsg::Object> camera;
   scenes[0]->traverseDown([&](const lsg::Ref<lsg::Object>& object) {
@@ -27,7 +27,7 @@ int main() {
   lsg::Ref<lsg::Transform> cameraTransform = camera->getComponent<lsg::Transform>();
 
   cppglfw::GLFWManager& glfwInstance = cppglfw::GLFWManager::instance();
-  cppglfw::Window window = glfwInstance.createWindow("Test", 1024, 768, {{GLFW_CLIENT_API, GLFW_NO_API}});
+  cppglfw::Window window = glfwInstance.createWindow("Test", 1024, 720, {{GLFW_CLIENT_API, GLFW_NO_API}});
 
   RendererConfiguration config;
   config.validationLayers.clear();
@@ -89,10 +89,6 @@ int main() {
     }
     if (window.getKey(GLFW_KEY_O) == GLFW_PRESS) {
       cameraTransform->rotateZ(-dt / 1000.0f);
-    }
-
-    if (cameraTransform->isWorldMatrixDirty()) {
-      auto startTime = std::chrono::high_resolution_clock::now();
     }
 
     glfwInstance.pollEvents();
