@@ -269,16 +269,16 @@
                           "extensions": {
                                  "ADOBE_materials_thin_transparency": {
                                    "transmissionFactor": 1.0,
-                                   "ior": 1.309
+                                   "ior": 1.8
                                  }
                               }
         },
         {
             "doubleSided" : true,
             "emissiveFactor" : [
-                10,
-                10,
-                10
+                5,
+                5,
+                5
             ],
             "name" : "EmissiveWhite",
             "pbrMetallicRoughness" : {}

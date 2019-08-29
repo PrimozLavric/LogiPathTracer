@@ -139,7 +139,7 @@ vec3 ConductorBRDF(vec3 F0, vec3 viewDir, float roughness, out vec3 lightDir) {
 
 vec3 SampleDielectricPhaseFunction(vec3 viewDir, float alpha, float eta, inout bool outside) {
   // Generate micro normal according to the distribution of visible normals
-  vec3 microNormal = (outside) ? SampleGGXVNDF(viewDir, alpha) : -SampleGGXVNDF(-viewDir, alpha);
+  vec3 microNormal = outside ? SampleGGXVNDF(viewDir, alpha) : -SampleGGXVNDF(-viewDir, alpha);
 
   float vdoth = dot(viewDir, microNormal);
 
@@ -160,15 +160,10 @@ vec3 SampleDielectricPhaseFunction(vec3 viewDir, float alpha, float eta, inout b
 vec3 DielectricBSDF(vec3 F0, vec3 viewDir, float roughness, float transmittance, float ior, out vec3 lightDir,
 bool outside) {
   float alpha = roughness * roughness;
-  vec3 energy = vec3(1.0f);
 
   // Init
   lightDir = -viewDir;
   float height = 0.0f;
-
-  // vec3 microNormal = SampleGGXVNDF(lightDir, alpha);
-  // lightDir = SampleDielectricPhaseFunction(-lightDir, alpha, (outside ? ior : 1.0f / ior), outside);
-  // return vec3(1.0f);
 
   // Random walk
   int order = 0;

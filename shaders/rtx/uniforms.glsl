@@ -23,6 +23,7 @@ struct Material {
   uint emissionTexture;
   uint metallicRoughnessTexture;
   uint transmissionTexture;
+  uint normalTexture;
   uint verticesOffset;
 };
 
@@ -56,6 +57,6 @@ layout(std430, set = 0, binding = 4) buffer VertexBuffer {
   Vertex vertices[];
 };
 
-layout(set = 0, binding = 5) uniform sampler2D textures[256];
+layout(set = 0, binding = 5) uniform sampler2D textures[512];
 
 #endif// LOGIPATHTRACER_RTX_UNIFORMS_H

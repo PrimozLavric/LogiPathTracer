@@ -13,15 +13,16 @@ Ray generateRay() {
 
   float r1 = 2.0 * rand();
   float r2 = 2.0 * rand();
+  vec2 tmp = vec2(1024, 724);
 
   jitter.x = r1 < 1.0 ? sqrt(r1) - 1.0 : 1.0 - sqrt(2.0 - r1);
   jitter.y = r2 < 1.0 ? sqrt(r2) - 1.0 : 1.0 - sqrt(2.0 - r2);
-  jitter /= (gl_LaunchSizeNV.xy * 0.5);
+  jitter /= (vec2(gl_LaunchSizeNV.xy) * 0.5);
 
   vec2 uv = 2.0 * vec2(gl_LaunchIDNV.xy) / vec2(gl_LaunchSizeNV.xy) - 1.0 + jitter;
   vec3 origin = ubo.camera.worldMatrix[3].xyz;
 
-  float aspectRatio = gl_LaunchSizeNV.x / gl_LaunchSizeNV.y;
+  float aspectRatio = float(gl_LaunchSizeNV.x) / float(gl_LaunchSizeNV.y);
   uv.x *= aspectRatio * tan(ubo.camera.fovY / 2.0);
   uv.y *= tan(ubo.camera.fovY / 2.0);
 

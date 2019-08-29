@@ -330,7 +330,8 @@ void RendererRTX::initializeAccumulationTexture() {
   imageInfo.sharingMode = vk::SharingMode::eExclusive;
   // Set initial layout of the image to undefined
   imageInfo.initialLayout = vk::ImageLayout::eUndefined;
-  imageInfo.extent = vk::Extent3D(swapchainImageExtent_.width, swapchainImageExtent_.height, 1);
+  imageInfo.extent =
+    vk::Extent3D(swapchainImageExtent_.width * renderScale, swapchainImageExtent_.height * renderScale, 1);
   imageInfo.usage = vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eSampled;
 
   accumulationTexture_.image = allocator_.createImage(imageInfo, allocationInfo);
@@ -521,6 +522,7 @@ void RendererRTX::initializeAndBindSceneBuffer() {
   descriptorWrites[2].pBufferInfo = &vertexBufferInfo;
 
   const std::vector<GPUTexture>& textures = sceneConverter_.getTextures();
+  std::cout << "Number of textures: " << textures.size() << std::endl;
   std::vector<vk::DescriptorImageInfo> descriptorImageInfos;
 
   if (!textures.empty()) {
@@ -571,8 +573,8 @@ void RendererRTX::recordCommandBuffers() {
 
     mainCmdBuffers_[i].traceRaysNV(shaderBindingTable_, bindingOffsetRayGenShader, shaderBindingTable_,
                                    bindingOffsetMissShader, bindingStride, shaderBindingTable_, bindingOffsetHitShader,
-                                   bindingStride, nullptr, 0, 0, swapchainImageExtent_.width,
-                                   swapchainImageExtent_.height, 1);
+                                   bindingStride, nullptr, 0, 0, swapchainImageExtent_.width * renderScale,
+                                   swapchainImageExtent_.height * renderScale, 1);
 
     vk::ImageMemoryBarrier imageMemoryBarrier;
     imageMemoryBarrier.srcAccessMask = vk::AccessFlagBits::eShaderWrite;
@@ -611,21 +613,21 @@ void RendererRTX::recordCommandBuffers() {
   }
 }
 
+static std::chrono::time_point<std::chrono::high_resolution_clock> startTime;
 void RendererRTX::preDraw() {
   if (selectedCameraTransform_->isWorldMatrixDirty()) {
     ubo_.camera.worldMatrix = selectedCameraTransform_->worldMatrix();
     ubo_.sampleCount = 0;
   }
 
-  updateUBOBuffer();
-}
-
-void RendererRTX::postDraw() {
-  static std::chrono::time_point<std::chrono::high_resolution_clock> startTime;
   if (ubo_.sampleCount == 0) {
     startTime = std::chrono::high_resolution_clock::now();
   }
 
+  updateUBOBuffer();
+}
+
+void RendererRTX::postDraw() {
   ubo_.sampleCount++;
   if (ubo_.sampleCount % 10 == 0) {
     std::cout << "Sample: " << ubo_.sampleCount << std::endl;

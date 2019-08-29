@@ -7,6 +7,7 @@
 #include "common/ray.glsl"
 #include "heitz/BSDF.glsl"
 #include "heitz/interaction_type.glsl"
+#include "basic/BSDF.glsl"
 #include "common/constants.glsl"
 
 precision highp float;
@@ -17,6 +18,7 @@ layout (local_size_x = WORKGROUP_SIZE, local_size_y = WORKGROUP_SIZE, local_size
 #define INTERSECTION_STACK_SIZE 20
 #define MAX_TRACE_DEPTH 10
 #define RUSSIAN_ROULETTE_BOUNCES 2
+#define USE_MICROFACET
 
 struct Camera {
   mat4 worldMatrix;
@@ -48,6 +50,7 @@ struct Object {
   uint emissionTexture;
   uint metallicRoughnessTexture;
   uint transmissionTexture;
+  uint normalTexture;
   uint bvhOffset;// Byte offset to object's BVH tree.
   uint verticesOffset;// Byte offset to object's vertices.
 };
@@ -97,7 +100,7 @@ layout(std430, set = 0, binding = 5) buffer TrianglesBVHBuffer {
   BVHNode meshBVHNodes[];
 };
 
-layout(set = 0, binding = 6) uniform sampler2D textures[256];
+layout(set = 0, binding = 6) uniform sampler2D textures[512];
 
 Ray generateRay(vec2 resolution) {
   vec2 jitter;
@@ -112,7 +115,7 @@ Ray generateRay(vec2 resolution) {
   vec2 uv = 2.0 * vec2(gl_GlobalInvocationID.xy) / vec2(resolution.x, resolution.y) - 1.0 + jitter;
   vec3 origin = ubo.camera.worldMatrix[3].xyz;
 
-  float aspectRatio = 1;//resolution.x / resolution.y;
+  float aspectRatio = resolution.x / resolution.y;
   uv.x *= aspectRatio * tan(ubo.camera.fovY / 2.0);
   uv.y *= tan(ubo.camera.fovY / 2.0);
 
@@ -247,9 +250,9 @@ vec3 traceRay(Ray ray) {
     }
 
     if (object.metallicRoughnessTexture != 0XFFFFFFFF) {
-      vec2 metallicRoughnessSample = texture(textures[object.metallicRoughnessTexture], uv).xy;
-      metallicFactor = metallicRoughnessSample.x;
-      roughnessFactor = metallicRoughnessSample.y;
+      vec4 metallicRoughnessSample = texture(textures[object.metallicRoughnessTexture], uv);
+      metallicFactor *= metallicRoughnessSample.b;
+      roughnessFactor *= metallicRoughnessSample.g;
     }
 
     if (object.transmissionTexture != 0XFFFFFFFF) {
@@ -259,7 +262,7 @@ vec3 traceRay(Ray ray) {
     baseColorFactor = SRGBToLinear(baseColorFactor);
 
     // Determine interaction type based on the emission, roughness and metalic factor and opacity.
-    uint interaction = determineMicrofacetInteractionType(roughnessFactor, metallicFactor, transmissionFactor);
+    uint interaction = determineMicrofacetInteractionType(metallicFactor, transmissionFactor);
 
     // Apply emission.
     accColor += mask * emissionFactor;
@@ -270,6 +273,13 @@ vec3 traceRay(Ray ray) {
     vec3 u = normalize(cross((abs(ffNormal.x) > 0.1f ? vec3(0.0f, 1.0f, 0.0f) : vec3(1.0f, 0.0f, 0.0f)), ffNormal));
     vec3 v = cross(ffNormal, u);
 
+    if (object.normalTexture != 0XFFFFFFFF) {
+      vec3 tangentNormal = normalize(texture(textures[object.normalTexture], uv).xyz * 2.0 - 1.0);
+      ffNormal = normalize(mat3(u, v, ffNormal) * tangentNormal);
+      u = normalize(cross((abs(ffNormal.x) > 0.1f ? vec3(0.0f, 1.0f, 0.0f) : vec3(1.0f, 0.0f, 0.0f)), ffNormal));
+      v = cross(ffNormal, u);
+    }
+
     vec3 viewDir;
     vec3 lightDir;
     viewDir.x = dot(-ray.direction, u);
@@ -277,12 +287,25 @@ vec3 traceRay(Ray ray) {
     viewDir.z = dot(-ray.direction, ffNormal);
 
     if (interaction == kDiff) {
+      #ifdef USE_MICROFACET
       mask *= DiffuseBSDF(baseColorFactor.xyz, viewDir, roughnessFactor, lightDir);
+      #else
+      mask *= BasicDiffuseBRDF(baseColorFactor.xyz, viewDir, lightDir);
+      #endif
     } else if (interaction == kMetallic) {
+      #ifdef USE_MICROFACET
       mask *= ConductorBRDF(baseColorFactor.xyz, viewDir, roughnessFactor, lightDir);
+      #else
+      mask *= BasicSpecularBRDF(baseColorFactor.xyz, viewDir, lightDir);
+      #endif
     } else if (interaction == kTrans) {
       bool outside = dot(normal, -ray.direction) > 0.0f;
+
+      #ifdef USE_MICROFACET
       mask *= DielectricBSDF(baseColorFactor.xyz, viewDir, roughnessFactor, transmissionFactor, ior, lightDir, outside);
+      #else
+      mask *= BasicTransmittanceBRDF(baseColorFactor.xyz, viewDir, transmissionFactor, ior, outside, lightDir);
+      #endif
     }
 
     lightDir = lightDir.x * u + lightDir.y * v + lightDir.z * ffNormal;

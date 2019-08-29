@@ -10,11 +10,11 @@
 #include "RendererPT.h"
 #include "RendererRTX.h"
 
-const bool RTX = true;
+const bool RTX = false;
 
 int main() {
   lsg::GLTFLoader loader;
-  std::vector<lsg::Ref<lsg::Scene>> scenes = loader.load("./resources/cornell_box.gltf");
+  std::vector<lsg::Ref<lsg::Scene>> scenes = loader.load("./resources/CornellBox/cornell.gltf");
 
   lsg::Ref<lsg::Object> camera;
   scenes[0]->traverseDown([&](const lsg::Ref<lsg::Object>& object) {
@@ -27,10 +27,11 @@ int main() {
   lsg::Ref<lsg::Transform> cameraTransform = camera->getComponent<lsg::Transform>();
 
   cppglfw::GLFWManager& glfwInstance = cppglfw::GLFWManager::instance();
-  cppglfw::Window window = glfwInstance.createWindow("Test", 1024, 720, {{GLFW_CLIENT_API, GLFW_NO_API}});
+  cppglfw::Window window = glfwInstance.createWindow("Test", 960, 540, {{GLFW_CLIENT_API, GLFW_NO_API}});
 
   RendererConfiguration config;
-  config.validationLayers.clear();
+  config.renderScale = 2;
+  // config.validationLayers.clear();
   std::unique_ptr<RendererCore> renderer;
   if (RTX) {
     config.deviceExtensions.emplace_back("VK_NV_ray_tracing");

@@ -3,10 +3,10 @@
 #include <utility>
 
 RendererConfiguration::RendererConfiguration(std::string windowTitle, int32_t windowWidth, int32_t windowHeight,
-                                             std::vector<const char*> instanceExtensions,
+                                             float renderScale, std::vector<const char*> instanceExtensions,
                                              std::vector<const char*> deviceExtensions,
                                              std::vector<const char*> validationLayers)
-  : windowTitle(std::move(windowTitle)), windowWidth(windowWidth), windowHeight(windowHeight),
+  : windowTitle(std::move(windowTitle)), windowWidth(windowWidth), windowHeight(windowHeight), renderScale(renderScale),
     instanceExtensions(std::move(instanceExtensions)), deviceExtensions(std::move(deviceExtensions)),
     validationLayers(std::move(validationLayers)) {}
 
@@ -25,7 +25,7 @@ VkBool32 debugCallback(VkDebugReportFlagsEXT flags, VkDebugReportObjectTypeEXT o
 }
 
 RendererCore::RendererCore(cppglfw::Window window, const RendererConfiguration& configuration)
-  : window_(std::move(window)) {
+  : window_(std::move(window)), renderScale(configuration.renderScale) {
   // Create instance.
   createInstance(configuration.instanceExtensions, configuration.validationLayers);
   // Create surface and register it on to the instance.

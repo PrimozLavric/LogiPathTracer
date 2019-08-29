@@ -115,9 +115,11 @@ void RTXSceneConverter::loadMesh(const lsg::Ref<lsg::SubMesh>& subMesh, const gl
   gpuMaterial.metallicRoughnessTexture = (material->metallicRoughnessTex())
                                            ? copyTextureToGPU(material->metallicRoughnessTex())
                                            : std::numeric_limits<uint32_t>::max();
-  gpuMaterial.metallicRoughnessTexture = (material->transmissionTexture())
-                                           ? copyTextureToGPU(material->transmissionTexture())
-                                           : std::numeric_limits<uint32_t>::max();
+  gpuMaterial.transmissionTexture = (material->transmissionTexture())
+                                      ? copyTextureToGPU(material->transmissionTexture())
+                                      : std::numeric_limits<uint32_t>::max();
+  gpuMaterial.normalTexture =
+    (material->normalTex()) ? copyTextureToGPU(material->normalTex()) : std::numeric_limits<uint32_t>::max();
 
   // BLAS Geometry info
   vk::GeometryNV geometryAS;

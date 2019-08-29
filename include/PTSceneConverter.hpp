@@ -19,7 +19,8 @@ struct GPUObjectData {
                          float ior = {}, uint32_t colorTexture = std::numeric_limits<uint32_t>::max(),
                          uint32_t emissionTexture = std::numeric_limits<uint32_t>::max(),
                          uint32_t metallicRoughnessTexture = std::numeric_limits<uint32_t>::max(),
-                         uint32_t transmissionTexture = std::numeric_limits<uint32_t>::max(), uint32_t bvhOffset = {},
+                         uint32_t transmissionTexture = std::numeric_limits<uint32_t>::max(),
+                         uint32_t normalTexture = std::numeric_limits<uint32_t>::max(), uint32_t bvhOffset = {},
                          uint32_t verticesOffset = {});
 
   glm::mat4 worldMatrix;
@@ -34,9 +35,10 @@ struct GPUObjectData {
   uint32_t emissionTexture;
   uint32_t metallicRoughnessTexture;
   uint32_t transmissionTexture;
+  uint32_t normalTexture;
   uint32_t bvhOffset;
   uint32_t verticesOffset;
-  std::byte padding[12];
+  std::byte padding[8];
 };
 
 struct GPUVertex {

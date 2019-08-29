@@ -12,13 +12,15 @@
 
 struct RendererConfiguration {
   explicit RendererConfiguration(std::string windowTitle = "Renderer", int32_t windowWidth = 1280,
-                                 int32_t windowHeight = 720, std::vector<const char*> instanceExtensions = {},
+                                 int32_t windowHeight = 720, float renderScale = 1,
+                                 std::vector<const char*> instanceExtensions = {},
                                  std::vector<const char*> deviceExtensions = {},
                                  std::vector<const char*> validationLayers = {"VK_LAYER_LUNARG_standard_validation"});
 
   std::string windowTitle;
   int32_t windowWidth;
   int32_t windowHeight;
+  float renderScale;
   std::vector<const char*> instanceExtensions;
   std::vector<const char*> deviceExtensions;
   std::vector<const char*> validationLayers;
@@ -99,6 +101,7 @@ class RendererCore {
   std::vector<logi::ImageView> swapchainImageViews_;
   vk::Extent2D swapchainImageExtent_;
   vk::Format swapchainImageFormat_;
+  float renderScale;
 
   // Synchronization objects
   logi::Semaphore swapchainImgAvailableSemaphore_;

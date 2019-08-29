@@ -9,12 +9,12 @@ GPUObjectData::GPUObjectData(const glm::mat4& worldMatrix, const glm::mat4& worl
                              const glm::vec4& baseColorFactor, const glm::vec3& emissionFactor, float metallicFactor,
                              float roughnessFactor, float transmissionFactor, float ior, uint32_t colorTexture,
                              uint32_t emissionTexture, uint32_t metallicRoughnessTexture, uint32_t transmissionTexture,
-                             uint32_t bvhOffset, uint32_t verticesOffset)
+                             uint32_t normalTexture, uint32_t bvhOffset, uint32_t verticesOffset)
   : worldMatrix(worldMatrix), worldMatrixInverse(worldMatrixInverse), baseColorFactor(baseColorFactor),
     emissionFactor(emissionFactor), metallicFactor(metallicFactor), roughnessFactor(roughnessFactor),
     transmissionFactor(transmissionFactor), colorTexture(colorTexture), emissionTexture(emissionTexture),
-    metallicRoughnessTexture(metallicRoughnessTexture), transmissionTexture(transmissionTexture), ior(ior),
-    bvhOffset(bvhOffset), verticesOffset(verticesOffset) {}
+    metallicRoughnessTexture(metallicRoughnessTexture), transmissionTexture(transmissionTexture),
+    normalTexture(normalTexture), ior(ior), bvhOffset(bvhOffset), verticesOffset(verticesOffset) {}
 
 GPUVertex::GPUVertex(const glm::vec3& position, const glm::vec3& normal, const glm::vec2& uv)
   : position(position), normal(normal), uv(uv) {}
@@ -77,9 +77,12 @@ void PTSceneConverter::loadScene(const lsg::Ref<lsg::Scene>& scene) {
                                                   ? copyTextureToGPU(material->metallicRoughnessTex())
                                                   : std::numeric_limits<uint32_t>::max();
           objectData.transmissionFactor = material->transmissionFactor();
-          objectData.metallicRoughnessTexture = (material->transmissionTexture())
-                                                  ? copyTextureToGPU(material->transmissionTexture())
-                                                  : std::numeric_limits<uint32_t>::max();
+          objectData.transmissionTexture = (material->transmissionTexture())
+                                             ? copyTextureToGPU(material->transmissionTexture())
+                                             : std::numeric_limits<uint32_t>::max();
+          objectData.normalTexture =
+            (material->normalTex()) ? copyTextureToGPU(material->normalTex()) : std::numeric_limits<uint32_t>::max();
+
           objectData.ior = material->ior();
           objectData.bvhOffset = meshBVHNodes_.size();
           objectData.verticesOffset = vertices_.size();

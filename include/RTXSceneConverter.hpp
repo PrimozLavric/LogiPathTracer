@@ -36,7 +36,9 @@ struct RTXMaterial {
   uint32_t emissionTexture = std::numeric_limits<uint32_t>::max();
   uint32_t metallicRoughnessTexture = std::numeric_limits<uint32_t>::max();
   uint32_t transmissionTexture = std::numeric_limits<uint32_t>::max();
+  uint32_t normalTexture = std::numeric_limits<uint32_t>::max();
   uint32_t verticesOffset;
+  uint32_t padding[3];
 };
 
 struct RTXVertex {

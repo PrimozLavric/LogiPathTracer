@@ -249,7 +249,8 @@ void RendererPT::initializeAccumulationTexture() {
   imageInfo.sharingMode = vk::SharingMode::eExclusive;
   // Set initial layout of the image to undefined
   imageInfo.initialLayout = vk::ImageLayout::eUndefined;
-  imageInfo.extent = vk::Extent3D(swapchainImageExtent_.width, swapchainImageExtent_.height, 1);
+  imageInfo.extent =
+    vk::Extent3D(swapchainImageExtent_.width * renderScale, swapchainImageExtent_.height * renderScale, 1);
   imageInfo.usage = vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eSampled;
 
   accumulationTexture_.image = allocator_.createImage(imageInfo, allocationInfo);
@@ -500,8 +501,9 @@ void RendererPT::recordCommandBuffers() {
     mainCmdBuffers_[i].bindDescriptorSets(
       vk::PipelineBindPoint::eCompute, pathTracingPipelineLayoutData_.layout, 0,
       std::vector<vk::DescriptorSet>(pathTracingDescSets_.begin(), pathTracingDescSets_.end()));
-    mainCmdBuffers_[i].dispatch(static_cast<uint32_t>(std::ceil(swapchainImageExtent_.width / float(32))),
-                                static_cast<uint32_t>(std::ceil(swapchainImageExtent_.height / float(32))), 1);
+    mainCmdBuffers_[i].dispatch(
+      static_cast<uint32_t>(std::ceil(swapchainImageExtent_.width * renderScale / float(32))),
+      static_cast<uint32_t>(std::ceil(swapchainImageExtent_.height * renderScale / float(32))), 1);
 
     vk::ImageMemoryBarrier imageMemoryBarrier;
     imageMemoryBarrier.srcAccessMask = vk::AccessFlagBits::eShaderWrite;
@@ -540,21 +542,21 @@ void RendererPT::recordCommandBuffers() {
   }
 }
 
+static std::chrono::time_point<std::chrono::high_resolution_clock> startTime;
+
 void RendererPT::preDraw() {
   if (selectedCameraTransform_->isWorldMatrixDirty()) {
     ubo_.camera.worldMatrix = selectedCameraTransform_->worldMatrix();
     ubo_.sampleCount = 0;
+  }
+  if (ubo_.sampleCount == 0) {
+    startTime = std::chrono::high_resolution_clock::now();
   }
 
   updateUBOBuffer();
 }
 
 void RendererPT::postDraw() {
-  static std::chrono::time_point<std::chrono::high_resolution_clock> startTime;
-  if (ubo_.sampleCount == 0) {
-    startTime = std::chrono::high_resolution_clock::now();
-  }
-
   ubo_.sampleCount++;
   if (ubo_.sampleCount % 10 == 0) {
     std::cout << "Sample: " << ubo_.sampleCount << std::endl;
