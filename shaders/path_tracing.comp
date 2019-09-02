@@ -21,330 +21,330 @@ layout (local_size_x = WORKGROUP_SIZE, local_size_y = WORKGROUP_SIZE, local_size
 #define USE_MICROFACET
 
 struct Camera {
-  mat4 worldMatrix;
-  float fovY;
+    mat4 worldMatrix;
+    float fovY;
 };
 
 struct BVHNode {
-  vec3 minCorner;// Minumum bounding box point.
-  vec3 maxCorner;// Maximum bounding box point.
+    vec3 minCorner;// Minumum bounding box point.
+    vec3 maxCorner;// Maximum bounding box point.
 
-  bool isLeaf;
+    bool isLeaf;
 /**
  * Indices of child nodes (if inner node).
  * Primitive indices range (if leaf node)  [first, last).
   */
-  uvec2 indices;
+    uvec2 indices;
 };
 
 struct Object {
-  mat4 worldMatrix;// Object's world matrix.
-  mat4 worldMatrixInverse;// Object's world matrix inverse.
-  vec4 baseColorFactor;// Base color of the material (RGBA). Transparency not yet supported.
-  vec3 emissionFactor;// Object's emissive factor (RGB)
-  float metallicFactor;// Object's metallness factor (used to determin specular component strength).
-  float roughnessFactor;// Object's roughness factor (used to determine diffuse component strength).
-  float transmissionFactor;
-  float ior;
-  uint colorTexture;
-  uint emissionTexture;
-  uint metallicRoughnessTexture;
-  uint transmissionTexture;
-  uint normalTexture;
-  uint bvhOffset;// Byte offset to object's BVH tree.
-  uint verticesOffset;// Byte offset to object's vertices.
+    mat4 worldMatrix;// Object's world matrix.
+    mat4 worldMatrixInverse;// Object's world matrix inverse.
+    vec4 baseColorFactor;// Base color of the material (RGBA). Transparency not yet supported.
+    vec3 emissionFactor;// Object's emissive factor (RGB)
+    float metallicFactor;// Object's metallness factor (used to determin specular component strength).
+    float roughnessFactor;// Object's roughness factor (used to determine diffuse component strength).
+    float transmissionFactor;
+    float ior;
+    uint colorTexture;
+    uint emissionTexture;
+    uint metallicRoughnessTexture;
+    uint transmissionTexture;
+    uint normalTexture;
+    uint bvhOffset;// Byte offset to object's BVH tree.
+    uint verticesOffset;// Byte offset to object's vertices.
 };
 
 struct Vertex {
-  vec3 position;
-  vec3 normal;
-  vec2 uv;
+    vec3 position;
+    vec3 normal;
+    vec2 uv;
 };
 
 struct Intersection {
-  float distance;
-  uint objectIndex;
-  uint primitiveIndex;
+    float distance;
+    uint objectIndex;
+    uint primitiveIndex;
 };
 
 
 struct State {
-  Object obj;// Intersected object.
-  vec3 position;// Current intersection position.
-  vec3 normal;// Intersection normal.
-  vec3 viewDir;// Direction towards viewer.
-  vec3 lightDir;// Direction towards light.
-  float currentIor;
+    Object obj;// Intersected object.
+    vec3 position;// Current intersection position.
+    vec3 normal;// Intersection normal.
+    vec3 viewDir;// Direction towards viewer.
+    vec3 lightDir;// Direction towards light.
+    float currentIor;
 };
 
 layout (set = 0, binding = 0, rgba32f) uniform image2D accumulationImage;
 
 layout (std140, set = 0, binding = 1) uniform UBO {
-  Camera camera;
-  uint sampleCount;
+    Camera camera;
+    uint sampleCount;
 } ubo;
 
 layout(std430, set = 0, binding = 2) buffer ObjectsBuffer {
-  Object objects[];
+    Object objects[];
 };
 
 layout(std430, set = 0, binding = 3) buffer ObjectBVHBuffer {
-  BVHNode objectBVHNodes[];
+    BVHNode objectBVHNodes[];
 };
 
 layout(std430, set = 0, binding = 4) buffer TrianglesBuffer {
-  Vertex vertices[];
+    Vertex vertices[];
 };
 
 layout(std430, set = 0, binding = 5) buffer TrianglesBVHBuffer {
-  BVHNode meshBVHNodes[];
+    BVHNode meshBVHNodes[];
 };
 
 layout(set = 0, binding = 6) uniform sampler2D textures[512];
 
 Ray generateRay(vec2 resolution) {
-  vec2 jitter;
+    vec2 jitter;
 
-  float r1 = 2.0 * rand();
-  float r2 = 2.0 * rand();
+    float r1 = 2.0 * rand();
+    float r2 = 2.0 * rand();
 
-  jitter.x = r1 < 1.0 ? sqrt(r1) - 1.0 : 1.0 - sqrt(2.0 - r1);
-  jitter.y = r2 < 1.0 ? sqrt(r2) - 1.0 : 1.0 - sqrt(2.0 - r2);
-  jitter /= (resolution * 0.5);
+    jitter.x = r1 < 1.0 ? sqrt(r1) - 1.0 : 1.0 - sqrt(2.0 - r1);
+    jitter.y = r2 < 1.0 ? sqrt(r2) - 1.0 : 1.0 - sqrt(2.0 - r2);
+    jitter /= (resolution * 0.5);
 
-  vec2 uv = 2.0 * vec2(gl_GlobalInvocationID.xy) / vec2(resolution.x, resolution.y) - 1.0 + jitter;
-  vec3 origin = ubo.camera.worldMatrix[3].xyz;
+    vec2 uv = 2.0 * vec2(gl_GlobalInvocationID.xy) / vec2(resolution.x, resolution.y) - 1.0 + jitter;
+    vec3 origin = ubo.camera.worldMatrix[3].xyz;
 
-  float aspectRatio = resolution.x / resolution.y;
-  uv.x *= aspectRatio * tan(ubo.camera.fovY / 2.0);
-  uv.y *= tan(ubo.camera.fovY / 2.0);
+    float aspectRatio = resolution.x / resolution.y;
+    uv.x *= aspectRatio * tan(ubo.camera.fovY / 2.0);
+    uv.y *= tan(ubo.camera.fovY / 2.0);
 
-  vec3 rayDir = normalize(uv.x * ubo.camera.worldMatrix[0].xyz + uv.y * ubo.camera.worldMatrix[1].xyz - ubo.camera.worldMatrix[2].xyz);
+    vec3 rayDir = normalize(uv.x * ubo.camera.worldMatrix[0].xyz + uv.y * ubo.camera.worldMatrix[1].xyz - ubo.camera.worldMatrix[2].xyz);
 
-  return Ray(origin, rayDir);
+    return Ray(origin, rayDir);
 }
 
 
 void objectIntersect(Ray ray, uint objectIndex, inout Intersection intersection) {
-  int bvhOffset = int(objects[objectIndex].bvhOffset);
-  uint verticesOffset = objects[objectIndex].verticesOffset;
+    int bvhOffset = int(objects[objectIndex].bvhOffset);
+    uint verticesOffset = objects[objectIndex].verticesOffset;
 
-  // Transform ray to object space
-  Ray rayObjSpace;
-  rayObjSpace.origin = vec3(objects[objectIndex].worldMatrixInverse * vec4(ray.origin, 1.0));
-  rayObjSpace.direction = mat3(objects[objectIndex].worldMatrixInverse) * ray.direction;
+    // Transform ray to object space
+    Ray rayObjSpace;
+    rayObjSpace.origin = vec3(objects[objectIndex].worldMatrixInverse * vec4(ray.origin, 1.0));
+    rayObjSpace.direction = mat3(objects[objectIndex].worldMatrixInverse) * ray.direction;
 
-  // Initialize stack.
-  uint ptr = 0;
-  int traversalStack[INTERSECTION_STACK_SIZE];
-  traversalStack[ptr++] = -1;
+    // Initialize stack.
+    uint ptr = 0;
+    int traversalStack[INTERSECTION_STACK_SIZE];
+    traversalStack[ptr++] = -1;
 
-  int idx = bvhOffset;
-  while (idx > -1) {
-    if (meshBVHNodes[idx].isLeaf) {
-      // Test intersections.
-      for (uint i = meshBVHNodes[idx].indices.x; i < meshBVHNodes[idx].indices.y; i++) {
-        uint firstVertexIdx = verticesOffset + 3 * i;
-        float triDistance = rayTriangleIntersect(rayObjSpace, vertices[firstVertexIdx].position, vertices[firstVertexIdx + 1].position, vertices[firstVertexIdx + 2].position);
+    int idx = bvhOffset;
+    while (idx > -1) {
+        if (meshBVHNodes[idx].isLeaf) {
+            // Test intersections.
+            for (uint i = meshBVHNodes[idx].indices.x; i < meshBVHNodes[idx].indices.y; i++) {
+                uint firstVertexIdx = verticesOffset + 3 * i;
+                float triDistance = rayTriangleIntersect(rayObjSpace, vertices[firstVertexIdx].position, vertices[firstVertexIdx + 1].position, vertices[firstVertexIdx + 2].position);
 
-        if (triDistance > EPS && triDistance < intersection.distance) {
-          intersection.distance = triDistance;
-          intersection.objectIndex = objectIndex;
-          intersection.primitiveIndex = firstVertexIdx;
+                if (triDistance > EPS && triDistance < intersection.distance) {
+                    intersection.distance = triDistance;
+                    intersection.objectIndex = objectIndex;
+                    intersection.primitiveIndex = firstVertexIdx;
+                }
+            }
+        } else {
+            int testIdx = int(bvhOffset + meshBVHNodes[idx].indices.x);
+            // If node is a branch add child nodes to stack.
+            if (rayAABBIntersectTest(rayObjSpace, meshBVHNodes[testIdx].minCorner, meshBVHNodes[testIdx].maxCorner, intersection.distance)) {
+                traversalStack[ptr++] = testIdx;
+            }
+
+            testIdx = int(bvhOffset + meshBVHNodes[idx].indices.y);
+            if (rayAABBIntersectTest(rayObjSpace, meshBVHNodes[testIdx].minCorner, meshBVHNodes[testIdx].maxCorner, intersection.distance)) {
+                traversalStack[ptr++] = testIdx;
+            }
         }
-      }
-    } else {
-      int testIdx = int(bvhOffset + meshBVHNodes[idx].indices.x);
-      // If node is a branch add child nodes to stack.
-      if (rayAABBIntersectTest(rayObjSpace, meshBVHNodes[testIdx].minCorner, meshBVHNodes[testIdx].maxCorner, intersection.distance)) {
-        traversalStack[ptr++] = testIdx;
-      }
 
-      testIdx = int(bvhOffset + meshBVHNodes[idx].indices.y);
-      if (rayAABBIntersectTest(rayObjSpace, meshBVHNodes[testIdx].minCorner, meshBVHNodes[testIdx].maxCorner, intersection.distance)) {
-        traversalStack[ptr++] = testIdx;
-      }
+        idx = traversalStack[--ptr];
     }
-
-    idx = traversalStack[--ptr];
-  }
 }
 
-
 Intersection sceneIntersect(Ray ray) {
-  Intersection intersection;
-  intersection.distance = INFINITY;
+    Intersection intersection;
+    intersection.distance = INFINITY;
 
-  // Initialize stack.
-  uint ptr = 0;
-  int traversalStack[INTERSECTION_STACK_SIZE];
-  traversalStack[ptr++] = -1;
+    // Initialize stack.
+    uint ptr = 0;
+    int traversalStack[INTERSECTION_STACK_SIZE];
+    traversalStack[ptr++] = -1;
 
-  int idx = 0;
+    int idx = 0;
 
-  while (idx > -1) {
-    if (objectBVHNodes[idx].isLeaf) {
-      // Test intersections.
-      for (uint i = objectBVHNodes[idx].indices.x; i < objectBVHNodes[idx].indices.y; i++) {
-        objectIntersect(ray, i, intersection);
-      }
-    } else {
-      // If node is a branch add child nodes to stack.
-      int testIdx = int(objectBVHNodes[idx].indices.x);
-      if (rayAABBIntersectTest(ray, objectBVHNodes[testIdx].minCorner, objectBVHNodes[testIdx].maxCorner, intersection.distance)) {
-        traversalStack[ptr++] = testIdx;
-      }
+    while (idx > -1) {
+        if (objectBVHNodes[idx].isLeaf) {
+            // Test intersections.
+            for (uint i = objectBVHNodes[idx].indices.x; i < objectBVHNodes[idx].indices.y; i++) {
+                objectIntersect(ray, i, intersection);
+            }
+        } else {
+            // If node is a branch add child nodes to stack.
+            int testIdx = int(objectBVHNodes[idx].indices.x);
+            if (rayAABBIntersectTest(ray, objectBVHNodes[testIdx].minCorner, objectBVHNodes[testIdx].maxCorner, intersection.distance)) {
+                traversalStack[ptr++] = testIdx;
+            }
 
-      testIdx = int(objectBVHNodes[idx].indices.y);
-      if (rayAABBIntersectTest(ray, objectBVHNodes[testIdx].minCorner, objectBVHNodes[testIdx].maxCorner, intersection.distance)) {
-        traversalStack[ptr++] = testIdx;
-      }
+            testIdx = int(objectBVHNodes[idx].indices.y);
+            if (rayAABBIntersectTest(ray, objectBVHNodes[testIdx].minCorner, objectBVHNodes[testIdx].maxCorner, intersection.distance)) {
+                traversalStack[ptr++] = testIdx;
+            }
+        }
+
+        idx = traversalStack[--ptr];
     }
 
-    idx = traversalStack[--ptr];
-  }
-
-  return intersection;
+    return intersection;
 }
 
 vec3 traceRay(Ray ray) {
-  vec3 accColor = vec3(0.0, 0.0, 0.0);
-  vec3 mask = vec3(1.0, 1.0, 1.0);
+    vec3 accColor = vec3(0.0, 0.0, 0.0);
+    vec3 mask = vec3(1.0, 1.0, 1.0);
 
-  uint bounce;
-  for (bounce = 0; bounce < MAX_TRACE_DEPTH; bounce++) {
-    Intersection isect = sceneIntersect(ray);
+    uint bounce;
+    for (bounce = 0; bounce < MAX_TRACE_DEPTH; bounce++) {
+        Intersection isect = sceneIntersect(ray);
 
-    // Missed.
-    if (isect.distance == INFINITY) {
-      accColor = mask * 0.2;
-      break;
+        // Missed.
+        if (isect.distance == INFINITY) {
+            accColor = mask * 0.2;
+            break;
+        }
+
+        Object object = objects[isect.objectIndex];
+
+        // Compute intersection position and normal
+        Ray rayObjSpace;
+        rayObjSpace.origin = vec3(object.worldMatrixInverse * vec4(ray.origin, 1));
+        rayObjSpace.direction = mat3(object.worldMatrixInverse) * ray.direction;
+
+        vec3 isectPositionWorld = ray.origin + isect.distance * ray.direction;
+        vec3 bary = barycentricCoord(rayObjSpace.origin + isect.distance * rayObjSpace.direction, vertices[isect.primitiveIndex].position, vertices[isect.primitiveIndex + 1].position, vertices[isect.primitiveIndex + 2].position);
+        vec2 uv = bary.x * vertices[isect.primitiveIndex].uv + bary.y * vertices[isect.primitiveIndex + 1].uv + bary.z * vertices[isect.primitiveIndex + 2].uv;
+
+        vec4 baseColorFactor = object.baseColorFactor;
+        vec3 emissionFactor = object.emissionFactor;
+        float roughnessFactor = max(object.roughnessFactor, 0.001f);
+        float metallicFactor = object.metallicFactor;
+        float transmissionFactor = object.transmissionFactor;
+        float ior = object.ior;
+        float opacity = baseColorFactor.w;
+
+        // Color texture.
+        if (object.colorTexture != 0XFFFFFFFF) {
+            baseColorFactor *= texture(textures[object.colorTexture], uv).xyzw;
+        }
+        // Emission texture.
+        if (object.emissionTexture != 0XFFFFFFFF) {
+            emissionFactor *= texture(textures[object.emissionTexture], uv).xyz;
+        }
+
+        if (object.metallicRoughnessTexture != 0XFFFFFFFF) {
+            vec4 metallicRoughnessSample = texture(textures[object.metallicRoughnessTexture], uv);
+            metallicFactor *= metallicRoughnessSample.b;
+            roughnessFactor *= metallicRoughnessSample.g;
+        }
+
+        if (object.transmissionTexture != 0XFFFFFFFF) {
+            transmissionFactor *= texture(textures[object.transmissionTexture], uv).x;
+        }
+
+        baseColorFactor = SRGBToLinear(baseColorFactor);
+
+        // Determine interaction type based on the emission, roughness and metalic factor and opacity.
+        uint interaction = determineMicrofacetInteractionType(metallicFactor, transmissionFactor);
+
+        // Apply emission.
+        accColor += mask * emissionFactor;
+
+        // Compute orthonormal basis
+        vec3 normal = normalize(mat3(objects[isect.objectIndex].worldMatrix) * (bary.x * vertices[isect.primitiveIndex].normal + bary.y * vertices[isect.primitiveIndex + 1].normal + bary.z * vertices[isect.primitiveIndex + 2].normal));
+        vec3 ffNormal = (dot(normal, ray.direction) < 0.0f) ? normal : normal * -1.0f;// front facing normal
+        vec3 u = normalize(cross((abs(ffNormal.x) > 0.1f ? vec3(0.0f, 1.0f, 0.0f) : vec3(1.0f, 0.0f, 0.0f)), ffNormal));
+        vec3 v = cross(ffNormal, u);
+
+        if (object.normalTexture != 0XFFFFFFFF) {
+            vec3 tangentNormal = normalize(texture(textures[object.normalTexture], uv).xyz * 2.0 - 1.0);
+            ffNormal = normalize(mat3(u, v, ffNormal) * tangentNormal);
+            u = normalize(cross((abs(ffNormal.x) > 0.1f ? vec3(0.0f, 1.0f, 0.0f) : vec3(1.0f, 0.0f, 0.0f)), ffNormal));
+            v = cross(ffNormal, u);
+        }
+
+        vec3 viewDir;
+        vec3 lightDir;
+        viewDir.x = dot(-ray.direction, u);
+        viewDir.y = dot(-ray.direction, v);
+        viewDir.z = dot(-ray.direction, ffNormal);
+
+        if (interaction == kDiff) {
+            #ifdef USE_MICROFACET
+            mask *= DiffuseBSDF(baseColorFactor.xyz, viewDir, roughnessFactor, lightDir);
+            #else
+            mask *= BasicDiffuseBRDF(baseColorFactor.xyz, viewDir, lightDir);
+            #endif
+        } else if (interaction == kMetallic) {
+            #ifdef USE_MICROFACET
+            mask *= ConductorBRDF(baseColorFactor.xyz, viewDir, roughnessFactor, lightDir);
+            #else
+            mask *= BasicSpecularBRDF(baseColorFactor.xyz, viewDir, lightDir);
+            #endif
+        } else if (interaction == kTrans) {
+            bool outside = dot(normal, -ray.direction) > 0.0f;
+
+            #ifdef USE_MICROFACET
+            mask *= DielectricBSDF(baseColorFactor.xyz, viewDir, roughnessFactor, transmissionFactor, ior, lightDir, outside);
+            #else
+            mask *= BasicTransmittanceBRDF(baseColorFactor.xyz, viewDir, transmissionFactor, ior, outside, lightDir);
+            #endif
+        }
+
+        lightDir = lightDir.x * u + lightDir.y * v + lightDir.z * ffNormal;
+
+        ray.origin = isectPositionWorld;
+        ray.direction = lightDir;
+
+        if (length(mask) < 0.5 && bounce > RUSSIAN_ROULETTE_BOUNCES) {
+            float q = max(0.05f, 1.0f - length(mask));
+            if (rand() < q) {
+                break;
+            }
+            mask /= 1.0f - q;
+        }
     }
 
-    Object object = objects[isect.objectIndex];
-
-    // Compute intersection position and normal
-    Ray rayObjSpace;
-    rayObjSpace.origin = vec3(object.worldMatrixInverse * vec4(ray.origin, 1));
-    rayObjSpace.direction = mat3(object.worldMatrixInverse) * ray.direction;
-
-    vec3 isectPositionWorld = ray.origin + isect.distance * ray.direction;
-    vec3 bary = barycentricCoord(rayObjSpace.origin + isect.distance * rayObjSpace.direction, vertices[isect.primitiveIndex].position, vertices[isect.primitiveIndex + 1].position, vertices[isect.primitiveIndex + 2].position);
-    vec2 uv = bary.x * vertices[isect.primitiveIndex].uv + bary.y * vertices[isect.primitiveIndex + 1].uv + bary.z * vertices[isect.primitiveIndex + 2].uv;
-
-    vec4 baseColorFactor = object.baseColorFactor;
-    vec3 emissionFactor = object.emissionFactor;
-    float roughnessFactor = max(object.roughnessFactor, 0.001f);
-    float metallicFactor = object.metallicFactor;
-    float transmissionFactor = object.transmissionFactor;
-    float ior = object.ior;
-    float opacity = baseColorFactor.w;
-
-    // Color texture.
-    if (object.colorTexture != 0XFFFFFFFF) {
-      baseColorFactor *= texture(textures[object.colorTexture], uv).xyzw;
-    }
-    // Emission texture.
-    if (object.emissionTexture != 0XFFFFFFFF) {
-      emissionFactor *= texture(textures[object.emissionTexture], uv).xyz;
-    }
-
-    if (object.metallicRoughnessTexture != 0XFFFFFFFF) {
-      vec4 metallicRoughnessSample = texture(textures[object.metallicRoughnessTexture], uv);
-      metallicFactor *= metallicRoughnessSample.b;
-      roughnessFactor *= metallicRoughnessSample.g;
-    }
-
-    if (object.transmissionTexture != 0XFFFFFFFF) {
-      transmissionFactor *= texture(textures[object.transmissionTexture], uv).x;
-    }
-
-    baseColorFactor = SRGBToLinear(baseColorFactor);
-
-    // Determine interaction type based on the emission, roughness and metalic factor and opacity.
-    uint interaction = determineMicrofacetInteractionType(metallicFactor, transmissionFactor);
-
-    // Apply emission.
-    accColor += mask * emissionFactor;
-
-    // Compute orthonormal basis
-    vec3 normal = normalize(mat3(objects[isect.objectIndex].worldMatrix) * (bary.x * vertices[isect.primitiveIndex].normal + bary.y * vertices[isect.primitiveIndex + 1].normal + bary.z * vertices[isect.primitiveIndex + 2].normal));
-    vec3 ffNormal = (dot(normal, ray.direction) < 0.0f) ? normal : normal * -1.0f;// front facing normal
-    vec3 u = normalize(cross((abs(ffNormal.x) > 0.1f ? vec3(0.0f, 1.0f, 0.0f) : vec3(1.0f, 0.0f, 0.0f)), ffNormal));
-    vec3 v = cross(ffNormal, u);
-
-    if (object.normalTexture != 0XFFFFFFFF) {
-      vec3 tangentNormal = normalize(texture(textures[object.normalTexture], uv).xyz * 2.0 - 1.0);
-      ffNormal = normalize(mat3(u, v, ffNormal) * tangentNormal);
-      u = normalize(cross((abs(ffNormal.x) > 0.1f ? vec3(0.0f, 1.0f, 0.0f) : vec3(1.0f, 0.0f, 0.0f)), ffNormal));
-      v = cross(ffNormal, u);
-    }
-
-    vec3 viewDir;
-    vec3 lightDir;
-    viewDir.x = dot(-ray.direction, u);
-    viewDir.y = dot(-ray.direction, v);
-    viewDir.z = dot(-ray.direction, ffNormal);
-
-    if (interaction == kDiff) {
-      #ifdef USE_MICROFACET
-      mask *= DiffuseBSDF(baseColorFactor.xyz, viewDir, roughnessFactor, lightDir);
-      #else
-      mask *= BasicDiffuseBRDF(baseColorFactor.xyz, viewDir, lightDir);
-      #endif
-    } else if (interaction == kMetallic) {
-      #ifdef USE_MICROFACET
-      mask *= ConductorBRDF(baseColorFactor.xyz, viewDir, roughnessFactor, lightDir);
-      #else
-      mask *= BasicSpecularBRDF(baseColorFactor.xyz, viewDir, lightDir);
-      #endif
-    } else if (interaction == kTrans) {
-      bool outside = dot(normal, -ray.direction) > 0.0f;
-
-      #ifdef USE_MICROFACET
-      mask *= DielectricBSDF(baseColorFactor.xyz, viewDir, roughnessFactor, transmissionFactor, ior, lightDir, outside);
-      #else
-      mask *= BasicTransmittanceBRDF(baseColorFactor.xyz, viewDir, transmissionFactor, ior, outside, lightDir);
-      #endif
-    }
-
-    lightDir = lightDir.x * u + lightDir.y * v + lightDir.z * ffNormal;
-
-    ray.origin = isectPositionWorld;
-    ray.direction = lightDir;
-
-    if (length(mask) < 0.5 && bounce > RUSSIAN_ROULETTE_BOUNCES) {
-      float q = max(0.05f, 1.0f - length(mask));
-      if (rand() < q) {
-        break;
-      }
-      mask /= 1.0f - q;
-    }
-  }
-
-  return accColor;
+    return accColor;
 }
 
+
 void main() {
-  vec2 resolution = imageSize(accumulationImage);
+    vec2 resolution = imageSize(accumulationImage);
 
-  /*
-   In order to fit the work into workgroups, some unnecessary threads are launched.
-   We terminate those threads here.
-   */
-  if (gl_GlobalInvocationID.x >= resolution.x || gl_GlobalInvocationID.y >= resolution.y) {
-    return;
-  }
+    /*
+     In order to fit the work into workgroups, some unnecessary threads are launched.
+     We terminate those threads here.
+     */
+    if (gl_GlobalInvocationID.x >= resolution.x || gl_GlobalInvocationID.y >= resolution.y) {
+        return;
+    }
 
-  seed = uvec2((ubo.sampleCount, ubo.sampleCount + 1) * gl_GlobalInvocationID.xy);
+    seed = uvec2((ubo.sampleCount, ubo.sampleCount + 1) * gl_GlobalInvocationID.xy);
 
-  Ray ray = generateRay(resolution);
-  vec3 sampleColor = traceRay(ray);
+    Ray ray = generateRay(resolution);
+    vec3 sampleColor = traceRay(ray);
 
-  // store to the storage buffer:
-  if (ubo.sampleCount == 0) {
-    imageStore(accumulationImage, ivec2(gl_GlobalInvocationID.xy), vec4(sampleColor, 1.0));
-  } else {
-    imageStore(accumulationImage, ivec2(gl_GlobalInvocationID.xy), ((imageLoad(accumulationImage, ivec2(gl_GlobalInvocationID.xy)) * ubo.sampleCount) + vec4(sampleColor, 1.0)) / (ubo.sampleCount + 1));
-  }
+    // store to the storage buffer:
+    if (ubo.sampleCount == 0) {
+        imageStore(accumulationImage, ivec2(gl_GlobalInvocationID.xy), vec4(sampleColor, 1.0));
+    } else {
+        imageStore(accumulationImage, ivec2(gl_GlobalInvocationID.xy), ((imageLoad(accumulationImage, ivec2(gl_GlobalInvocationID.xy)) * ubo.sampleCount) + vec4(sampleColor, 1.0)) / (ubo.sampleCount + 1));
+    }
 }

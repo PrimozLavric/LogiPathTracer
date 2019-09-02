@@ -14,7 +14,7 @@ const bool RTX = false;
 
 int main() {
   lsg::GLTFLoader loader;
-  std::vector<lsg::Ref<lsg::Scene>> scenes = loader.load("./resources/CornellBox/cornell.gltf");
+  std::vector<lsg::Ref<lsg::Scene>> scenes = loader.load("./resources/cornell_box.gltf");
 
   lsg::Ref<lsg::Object> camera;
   scenes[0]->traverseDown([&](const lsg::Ref<lsg::Object>& object) {
