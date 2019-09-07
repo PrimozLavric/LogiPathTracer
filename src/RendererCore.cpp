@@ -2,6 +2,9 @@
 #include <cppglfw/GLFWManager.h>
 #include <utility>
 
+ScreenshotData::ScreenshotData(std::vector<glm::u8vec3> data, size_t width, size_t height)
+  : data(std::move(data)), width(width), height(height) {}
+
 RendererConfiguration::RendererConfiguration(std::string windowTitle, int32_t windowWidth, int32_t windowHeight,
                                              float renderScale, std::vector<const char*> instanceExtensions,
                                              std::vector<const char*> deviceExtensions,
@@ -32,6 +35,8 @@ RendererCore::RendererCore(cppglfw::Window window, const RendererConfiguration& 
   surface_ = instance_.registerSurfaceKHR(window_.createWindowSurface(instance_).value);
   selectPhysicalDevice();
   createLogicalDevice(configuration.deviceExtensions);
+  allocator_ = logicalDevice_.createMemoryAllocator();
+  graphicsFamilyCmdPool_ = graphicsFamily_.createCommandPool(vk::CommandPoolCreateFlagBits::eResetCommandBuffer);
   initializeSwapChain();
   buildSyncObjects();
   initializeCommandBuffers();
@@ -221,7 +226,7 @@ void RendererCore::initializeSwapChain() {
   createInfo.imageColorSpace = surfaceFormat.colorSpace;
   createInfo.imageExtent = extent;
   createInfo.imageArrayLayers = 1;
-  createInfo.imageUsage = vk::ImageUsageFlagBits::eColorAttachment;
+  createInfo.imageUsage = vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eTransferSrc;
   if (graphicsFamily_ != presentFamily_) {
     createInfo.imageSharingMode = vk::SharingMode::eConcurrent;
     createInfo.queueFamilyIndexCount = 2;
@@ -257,6 +262,127 @@ void RendererCore::initializeSwapChain() {
     swapchainImageViews_.emplace_back(image.createImageView(
       vk::ImageViewCreateFlags(), vk::ImageViewType::e2D, swapchainImageFormat_, vk::ComponentMapping(),
       vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1)));
+  }
+
+  // Create screenshot buffer.
+  screenshootImage_.destroy();
+
+  // Create the linear tiled destination image to copy to and to read the memory from
+  VmaAllocationCreateInfo ssBufferAllocationInfo = {};
+  ssBufferAllocationInfo.usage = VmaMemoryUsage::VMA_MEMORY_USAGE_GPU_TO_CPU;
+
+  vk::ImageCreateInfo ssImageCreateInfo;
+  ssImageCreateInfo.imageType = vk::ImageType::e2D;
+  // Note that vkCmdBlitImage (if supported) will also do format conversions if the swapchain color format would differ
+  ssImageCreateInfo.format = vk::Format::eR8G8B8A8Unorm;
+  ssImageCreateInfo.extent.width = swapchainImageExtent_.width;
+  ssImageCreateInfo.extent.height = swapchainImageExtent_.height;
+  ssImageCreateInfo.extent.depth = 1;
+  ssImageCreateInfo.arrayLayers = 1;
+  ssImageCreateInfo.mipLevels = 1;
+  ssImageCreateInfo.initialLayout = vk::ImageLayout::eUndefined;
+  ssImageCreateInfo.samples = vk::SampleCountFlagBits::e1;
+  ssImageCreateInfo.tiling = vk::ImageTiling::eLinear;
+  ssImageCreateInfo.usage = vk::ImageUsageFlagBits::eTransferDst;
+  screenshootImage_ = allocator_.createImage(ssImageCreateInfo, ssBufferAllocationInfo);
+
+  // Clear current command buffer.
+  for (const auto& cmdBuffer : screenshootCmdBuffers_) {
+    cmdBuffer.destroy();
+  }
+  screenshootCmdBuffers_.clear();
+
+  for (size_t i = 0; i < swapchainImages_.size(); i++) {
+    screenshootCmdBuffers_.emplace_back(graphicsFamilyCmdPool_.allocateCommandBuffer(vk::CommandBufferLevel::ePrimary));
+
+    logi::CommandBuffer& cmdBuffer = screenshootCmdBuffers_.back();
+    cmdBuffer.begin();
+
+    vk::ImageMemoryBarrier ssImageToTransferBarrier;
+    ssImageToTransferBarrier.oldLayout = vk::ImageLayout::eUndefined;
+    ssImageToTransferBarrier.newLayout = vk::ImageLayout::eTransferDstOptimal;
+    ssImageToTransferBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    ssImageToTransferBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    ssImageToTransferBarrier.image = screenshootImage_;
+    ssImageToTransferBarrier.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+    ssImageToTransferBarrier.subresourceRange.baseMipLevel = 0;
+    ssImageToTransferBarrier.subresourceRange.levelCount = 1;
+    ssImageToTransferBarrier.subresourceRange.baseArrayLayer = 0;
+    ssImageToTransferBarrier.subresourceRange.layerCount = 1;
+    ssImageToTransferBarrier.srcAccessMask = {};
+    ssImageToTransferBarrier.dstAccessMask = vk::AccessFlagBits::eTransferWrite;
+
+    cmdBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eTransfer, {}, {}, {},
+                              ssImageToTransferBarrier);
+
+    vk::ImageMemoryBarrier swapchainToTransferBarrier;
+    swapchainToTransferBarrier.oldLayout = vk::ImageLayout::ePresentSrcKHR;
+    swapchainToTransferBarrier.newLayout = vk::ImageLayout::eTransferSrcOptimal;
+    swapchainToTransferBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    swapchainToTransferBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    swapchainToTransferBarrier.image = swapchainImages_[i];
+    swapchainToTransferBarrier.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+    swapchainToTransferBarrier.subresourceRange.baseMipLevel = 0;
+    swapchainToTransferBarrier.subresourceRange.levelCount = 1;
+    swapchainToTransferBarrier.subresourceRange.baseArrayLayer = 0;
+    swapchainToTransferBarrier.subresourceRange.layerCount = 1;
+    swapchainToTransferBarrier.srcAccessMask = vk::AccessFlagBits::eMemoryRead;
+    swapchainToTransferBarrier.dstAccessMask = vk::AccessFlagBits::eTransferRead;
+
+    cmdBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eTransfer, {}, {}, {},
+                              swapchainToTransferBarrier);
+
+    // Copy the image
+    vk::ImageCopy imageCopyRegion{};
+    imageCopyRegion.srcSubresource.aspectMask = vk::ImageAspectFlagBits::eColor;
+    imageCopyRegion.srcSubresource.layerCount = 1;
+    imageCopyRegion.dstSubresource.aspectMask = vk::ImageAspectFlagBits::eColor;
+    imageCopyRegion.dstSubresource.layerCount = 1;
+    imageCopyRegion.extent.width = swapchainImageExtent_.width;
+    imageCopyRegion.extent.height = swapchainImageExtent_.height;
+    imageCopyRegion.extent.depth = 1;
+
+    // Issue the copy command
+    cmdBuffer.copyImage(swapchainImages_[i], vk::ImageLayout::eTransferSrcOptimal, screenshootImage_,
+                        vk::ImageLayout::eTransferDstOptimal, imageCopyRegion);
+
+    // Transition to DST optimal
+    vk::ImageMemoryBarrier swapchainToPresentBarrier;
+    swapchainToPresentBarrier.oldLayout = vk::ImageLayout::eTransferSrcOptimal;
+    swapchainToPresentBarrier.newLayout = vk::ImageLayout::ePresentSrcKHR;
+    swapchainToPresentBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    swapchainToPresentBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    swapchainToPresentBarrier.image = swapchainImages_[i];
+    swapchainToPresentBarrier.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+    swapchainToPresentBarrier.subresourceRange.baseMipLevel = 0;
+    swapchainToPresentBarrier.subresourceRange.levelCount = 1;
+    swapchainToPresentBarrier.subresourceRange.baseArrayLayer = 0;
+    swapchainToPresentBarrier.subresourceRange.layerCount = 1;
+    swapchainToPresentBarrier.srcAccessMask = vk::AccessFlagBits::eTransferRead;
+    swapchainToPresentBarrier.dstAccessMask = vk::AccessFlagBits::eMemoryRead;
+
+    cmdBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eTransfer, {}, {}, {},
+                              swapchainToPresentBarrier);
+
+    // Transition screenshot image to general
+    vk::ImageMemoryBarrier ssImageToGeneralBarrier;
+    ssImageToGeneralBarrier.oldLayout = vk::ImageLayout::eTransferDstOptimal;
+    ssImageToGeneralBarrier.newLayout = vk::ImageLayout::eGeneral;
+    ssImageToGeneralBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    ssImageToGeneralBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    ssImageToGeneralBarrier.image = screenshootImage_;
+    ssImageToGeneralBarrier.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+    ssImageToGeneralBarrier.subresourceRange.baseMipLevel = 0;
+    ssImageToGeneralBarrier.subresourceRange.levelCount = 1;
+    ssImageToGeneralBarrier.subresourceRange.baseArrayLayer = 0;
+    ssImageToGeneralBarrier.subresourceRange.layerCount = 1;
+    ssImageToGeneralBarrier.srcAccessMask = {};
+    ssImageToGeneralBarrier.dstAccessMask = vk::AccessFlagBits::eTransferWrite;
+
+    cmdBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eTransfer, {}, {}, {},
+                              ssImageToGeneralBarrier);
+
+    cmdBuffer.end();
   }
 }
 
@@ -343,7 +469,6 @@ PipelineLayoutData RendererCore::loadPipelineShaders(const std::vector<ShaderInf
 }
 
 void RendererCore::initializeCommandBuffers() {
-  graphicsFamilyCmdPool_ = graphicsFamily_.createCommandPool(vk::CommandPoolCreateFlagBits::eResetCommandBuffer);
   mainCmdBuffers_ =
     graphicsFamilyCmdPool_.allocateCommandBuffers(vk::CommandBufferLevel::ePrimary, swapchainImages_.size());
 }
@@ -397,6 +522,18 @@ void RendererCore::drawFrame() {
     submit_info.pSignalSemaphores = &static_cast<const vk::Semaphore&>(renderFinishedSemaphore_);
     graphicsQueue_.submit({submit_info}, inFlightFence_);
 
+    graphicsQueue_.waitIdle();
+
+    // Screenshot
+    {
+      vk::SubmitInfo submit_info;
+      submit_info.commandBufferCount = 1;
+      submit_info.pCommandBuffers = &static_cast<const vk::CommandBuffer&>(screenshootCmdBuffers_[imageIndex]);
+      graphicsQueue_.submit({submit_info});
+
+      graphicsQueue_.waitIdle();
+    }
+
     // Present image.
     presentQueue_.presentKHR(vk::PresentInfoKHR(1, &static_cast<const vk::Semaphore&>(renderFinishedSemaphore_), 1,
                                                 &static_cast<const vk::SwapchainKHR&>(swapchain_), &imageIndex));
@@ -414,3 +551,15 @@ void RendererCore::drawFrame() {
 void RendererCore::preDraw() {}
 
 void RendererCore::postDraw() {}
+
+ScreenshotData RendererCore::getScreenshot() {
+  auto* imageData = reinterpret_cast<glm::u8vec4*>(screenshootImage_.mapMemory());
+  std::vector<glm::u8vec3> data(swapchainImageExtent_.height * swapchainImageExtent_.width * 3);
+
+  for (uint32_t i = 0; i < swapchainImageExtent_.height * swapchainImageExtent_.width; i++) {
+    data[i] = glm::u8vec3(imageData[i].b, imageData[i].g, imageData[i].r);
+  }
+
+  screenshootImage_.unmapMemory();
+  return ScreenshotData(data, swapchainImageExtent_.width, swapchainImageExtent_.height);
+}

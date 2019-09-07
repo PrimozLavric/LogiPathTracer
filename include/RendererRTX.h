@@ -74,7 +74,6 @@ class RendererRTX : public RendererCore {
   vk::PhysicalDeviceRayTracingPropertiesNV rayTracingProperties_;
 
   logi::DescriptorPool descriptorPool_;
-  logi::MemoryAllocator allocator_;
 
   logi::RenderPass texViewerRenderPass_;
   std::vector<logi::Framebuffer> framebuffers_;

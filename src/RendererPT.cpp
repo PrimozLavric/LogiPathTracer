@@ -8,8 +8,7 @@
 #include <cmath>
 
 RendererPT::RendererPT(const cppglfw::Window& window, const RendererConfiguration& configuration)
-  : RendererCore(window, configuration), allocator_(logicalDevice_.createMemoryAllocator()),
-    sceneConverter_(allocator_, graphicsFamilyCmdPool_, graphicsQueue_) {
+  : RendererCore(window, configuration), sceneConverter_(allocator_, graphicsFamilyCmdPool_, graphicsQueue_) {
   srand(static_cast<unsigned>(time(0)));
 
   createTexViewerRenderPass();
@@ -312,12 +311,12 @@ void RendererPT::initializeDescriptorSets() {
   static const size_t numPoolSets = 10;
   static const std::vector<vk::DescriptorPoolSize> poolSizes = {
     //{vk::DescriptorType::eSampler, 0},
-    {vk::DescriptorType::eCombinedImageSampler, 257},
+    {vk::DescriptorType::eCombinedImageSampler, 600},
     //{vk::DescriptorType::eSampledImage, 0},
     {vk::DescriptorType::eStorageImage, 1},
     //{vk::DescriptorType::eUniformTexelBuffer, 0},
     //{vk::DescriptorType::eStorageTexelBuffer, 0},
-    {vk::DescriptorType::eUniformBuffer, 1},
+    {vk::DescriptorType::eUniformBuffer, 10},
     {vk::DescriptorType::eStorageBuffer, 4},
     //{vk::DescriptorType::eUniformBufferDynamic, 0},
     //{vk::DescriptorType::eStorageBufferDynamic, 0},

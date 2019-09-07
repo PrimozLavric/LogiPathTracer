@@ -2,6 +2,21 @@ cmake_minimum_required(VERSION 3.10)
 
 set(CMAKE_CXX_STANDARD 17)
 
+##############################################
+# Websocket library
+##############################################
+
+project(websockets LANGUAGES C CXX)
+
+file(GLOB_RECURSE USOCKETS_SRC "libs/uWebSockets/uSockets/src/*.c")
+
+add_definitions(-DLIBUS_NO_SSL)
+add_library(websockets STATIC ${USOCKETS_SRC})
+target_link_libraries(websockets z)
+
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/libs/uWebSockets/src ${CMAKE_CURRENT_SOURCE_DIR}/libs/uWebSockets/uSockets/src/)
+
+
 # Metadata
 project(LogiPathTracer VERSION 0.1.0 LANGUAGES CXX)
 
@@ -23,7 +38,6 @@ option(BUILD_EXAMPLES "Build examples" ON)
 include(ExternalDependencies.cmake)
 
 file(GLOB_RECURSE SRC_LIST "src/*.cpp")
-
 add_executable(logi_path_tracer ${SRC_LIST})
 
 target_include_directories(logi_path_tracer PUBLIC
@@ -31,7 +45,7 @@ target_include_directories(logi_path_tracer PUBLIC
         $<INSTALL_INTERFACE:include>
         )
 
-target_link_libraries(logi_path_tracer logi LogiSceneGraph CppGLFW)
+target_link_libraries(logi_path_tracer logi LogiSceneGraph CppGLFW websockets)
 
 # Copy resources directory.
 add_custom_command(TARGET logi_path_tracer POST_BUILD

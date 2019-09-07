@@ -13,3 +13,6 @@
 	url = https://github.com/LanaBesevic/CppGLFW.git
 	branch = master
 	master = master
+[submodule "libs/uWebSockets"]
+	path = libs/uWebSockets
+	url = https://github.com/uNetworking/uWebSockets.git

@@ -61,7 +61,6 @@ class RendererPT : public RendererCore {
   };
 
   logi::DescriptorPool descriptorPool_;
-  logi::MemoryAllocator allocator_;
 
   logi::RenderPass texViewerRenderPass_;
   std::vector<logi::Framebuffer> framebuffers_;

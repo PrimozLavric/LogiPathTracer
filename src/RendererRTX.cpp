@@ -7,8 +7,7 @@
 #include <cmath>
 
 RendererRTX::RendererRTX(const cppglfw::Window& window, const RendererConfiguration& configuration)
-  : RendererCore(window, configuration), allocator_(logicalDevice_.createMemoryAllocator()),
-    sceneConverter_(allocator_, graphicsFamilyCmdPool_, graphicsQueue_) {
+  : RendererCore(window, configuration), sceneConverter_(allocator_, graphicsFamilyCmdPool_, graphicsQueue_) {
   srand(static_cast<unsigned>(time(0)));
 
   // Fetch ray tracing properties.

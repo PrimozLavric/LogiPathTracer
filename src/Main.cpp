@@ -2,19 +2,58 @@
 #define GLFW_INCLUDE_VULKAN
 #include <cppglfw/CppGLFW.h>
 #include <logi/logi.hpp>
+#include "lodepng.h"
 
 #define LSG_VULKAN
 #include <lsg/lsg.h>
 #include <thread>
 #include <vulkan/vulkan.hpp>
+#include "App.h"
 #include "RendererPT.h"
 #include "RendererRTX.h"
 
 const bool RTX = true;
+std::unique_ptr<RendererCore> renderer;
+std::atomic<bool> sceneLoaded = false;
+std::mutex transmissionLock;
+
+void network() {
+  uWS::App()
+    .ws<void>("/*", {.compression = uWS::DEDICATED_COMPRESSOR,
+                     .maxPayloadLength = 4 * 3840 * 2160,
+                     .idleTimeout = 60,
+                     /* Handlers */
+                     .open = nullptr,
+                     .message =
+                       [](auto* ws, std::string_view message, uWS::OpCode opCode) {
+                         ScreenshotData ssData({}, 0, 0);
+                         {
+                           std::lock_guard lock(transmissionLock);
+                           ssData = renderer->getScreenshot();
+                         }
+
+                         ws->send(std::string_view(reinterpret_cast<char*>(ssData.data.data()),
+                                                   ssData.width * ssData.height * 3),
+                                  uWS::OpCode::BINARY, true);
+                       },
+                     .drain = nullptr,
+                     .ping = nullptr,
+                     .pong = nullptr,
+                     .close = nullptr})
+    .listen(8000,
+            [](auto* token) {
+              if (token) {
+                std::cout << "Listening on port " << 8000 << std::endl;
+              }
+            })
+    .run();
+
+  std::cout << "Failed to listen on port 8000" << std::endl;
+}
 
 int main() {
   lsg::GLTFLoader loader;
-  std::vector<lsg::Ref<lsg::Scene>> scenes = loader.load("./resources/mitsuba/testball.gltf");
+  std::vector<lsg::Ref<lsg::Scene>> scenes = loader.load("./resources/CornellBox/cornell.gltf");
 
   lsg::Ref<lsg::Object> camera;
   scenes[0]->traverseDown([&](const lsg::Ref<lsg::Object>& object) {
@@ -32,7 +71,7 @@ int main() {
   RendererConfiguration config;
   config.renderScale = 1;
   // config.validationLayers.clear();
-  std::unique_ptr<RendererCore> renderer;
+
   if (RTX) {
     config.deviceExtensions.emplace_back("VK_NV_ray_tracing");
     config.deviceExtensions.emplace_back("VK_KHR_get_memory_requirements2");
@@ -42,7 +81,12 @@ int main() {
     renderer = std::make_unique<RendererPT>(window, config);
   }
 
-  auto loadThread = std::thread([&]() { renderer->loadScene(scenes[0]); });
+  auto loadThread = std::thread([&]() {
+    renderer->loadScene(scenes[0]);
+    sceneLoaded = true;
+  });
+
+  auto networkThread = std::thread(&network);
 
   auto currentTime = std::chrono::high_resolution_clock::now();
   decltype(currentTime) previousTime;
@@ -93,9 +137,13 @@ int main() {
     }
 
     glfwInstance.pollEvents();
-    renderer->drawFrame();
+    if (sceneLoaded) {
+      std::lock_guard lock(transmissionLock);
+      renderer->drawFrame();
+    }
   }
 
   loadThread.join();
+  networkThread.join();
   return 0;
 }

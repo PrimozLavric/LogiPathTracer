@@ -5,6 +5,7 @@
 #define GLFW_INCLUDE_VULKAN
 #include <cppglfw/CppGLFW.h>
 #include <fstream>
+#include <glm/glm.hpp>
 #include <logi/logi.hpp>
 #include <lsg/lsg.h>
 #include <map>
@@ -43,6 +44,13 @@ struct PipelineLayoutData {
   std::vector<logi::DescriptorSetLayout> descriptorSetLayouts;
 };
 
+struct ScreenshotData {
+  ScreenshotData(std::vector<glm::u8vec3> data, size_t width, size_t height);
+  std::vector<glm::u8vec3> data;
+  size_t width;
+  size_t height;
+};
+
 class RendererCore {
  public:
   explicit RendererCore(cppglfw::Window window, const RendererConfiguration& configuration);
@@ -50,6 +58,8 @@ class RendererCore {
   virtual void drawFrame();
 
   virtual void loadScene(const lsg::Ref<lsg::Scene>& scene) = 0;
+
+  ScreenshotData getScreenshot();
 
  protected:
   void createInstance(const std::vector<const char*>& extensions, const std::vector<const char*>& validationLayers);
@@ -103,6 +113,9 @@ class RendererCore {
   vk::Format swapchainImageFormat_;
   float renderScale;
 
+  std::vector<logi::CommandBuffer> screenshootCmdBuffers_;
+  logi::VMAImage screenshootImage_;
+
   // Synchronization objects
   logi::Semaphore swapchainImgAvailableSemaphore_;
   logi::Semaphore renderFinishedSemaphore_;
@@ -112,6 +125,8 @@ class RendererCore {
   std::vector<logi::CommandBuffer> mainCmdBuffers_;
 
   size_t currentFrame_ = 0;
+
+  logi::MemoryAllocator allocator_;
 };
 
 #endif // LOGIPATHTRACER_RENDERERCORE_HPP
