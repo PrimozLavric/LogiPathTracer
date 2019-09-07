@@ -5,7 +5,7 @@
 #include "../common/util.glsl"
 #include "../common/random.glsl"
 
-#define HEITZ_MAX_ORDER 3
+#define HEITZ_MAX_ORDER 16
 
 float Fresnel(const float vdoth, const float eta) {
     const float cos_theta_t2 = 1.0f - (1.0f - vdoth * vdoth) / (eta * eta);
@@ -137,7 +137,7 @@ vec3 ConductorBRDF(vec3 F0, vec3 viewDir, float roughness, out vec3 lightDir) {
     return energy;
 }
 
-vec3 SampleDielectricPhaseFunction(vec3 viewDir, float alpha, float eta, inout bool outside) {
+vec3 SampleDielectricPhaseFunction(vec3 viewDir, float transmittance, float alpha, float eta, inout bool outside) {
     // Generate micro normal according to the distribution of visible normals
     vec3 microNormal = SampleGGXVNDF(viewDir, alpha);
 
@@ -165,9 +165,23 @@ bool outside) {
     lightDir = -viewDir;
     float height = 0.0f;
 
+    float iorOut;
+    float iorIn;
+
+    if (outside) {
+        iorOut = 1.0;
+        iorIn = ior;
+    } else {
+        iorOut = ior;
+        iorIn = 1.0;
+    }
+
+    outside = true;
+
     // Random walk
     int order = 0;
-    while (order < 1) {
+    while (order < HEITZ_MAX_ORDER) {
+
         // Next height
         if (outside) {
             height = SampleGGXHeight(lightDir, height, alpha);
@@ -177,7 +191,7 @@ bool outside) {
                 break;
             }
         } else {
-            height = -SampleGGXHeight(lightDir, -height, alpha);
+            height = -SampleGGXHeight(-lightDir, -height, alpha);
 
             // Left the microsurface?
             if (height < 0.0f) {
@@ -186,7 +200,7 @@ bool outside) {
         }
 
         // Next direction, plus weight
-        lightDir = SampleDielectricPhaseFunction(-lightDir, alpha, (outside ? ior : 1.0f / ior), outside);
+        lightDir = SampleDielectricPhaseFunction(-lightDir, transmittance, alpha, (outside ? iorIn / iorOut : iorOut / iorIn), outside);
 
         order++;
     }

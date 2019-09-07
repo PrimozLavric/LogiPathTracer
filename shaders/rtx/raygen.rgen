@@ -2,6 +2,7 @@
 #extension GL_NV_ray_tracing : require
 #extension GL_GOOGLE_include_directive : require
 
+
 #include "uniforms.glsl"
 #include "../common/ray.glsl"
 #include "../common/random.glsl"
@@ -13,7 +14,6 @@ Ray generateRay() {
 
   float r1 = 2.0 * rand();
   float r2 = 2.0 * rand();
-  vec2 tmp = vec2(1024, 724);
 
   jitter.x = r1 < 1.0 ? sqrt(r1) - 1.0 : 1.0 - sqrt(2.0 - r1);
   jitter.y = r2 < 1.0 ? sqrt(r2) - 1.0 : 1.0 - sqrt(2.0 - r2);
@@ -32,7 +32,7 @@ Ray generateRay() {
 }
 
 void main() {
-  seed = uvec2((ubo.sampleCount, ubo.sampleCount + 1) * gl_LaunchIDNV.xy);
+  seed = uvec2(ubo.seed * gl_LaunchIDNV.xy);
   Ray ray = generateRay();
 
   // Initialize payload data.
@@ -43,9 +43,9 @@ void main() {
 
   traceNV(accelerator, gl_RayFlagsOpaqueNV, 0xff, 0, 0, 0, ray.origin, 0.001, ray.direction, 10000.0, 0);
 
-  if (ubo.sampleCount == 0) {
+  if (ubo.reset) {
       imageStore(accumulationImage, ivec2(gl_LaunchIDNV.xy), vec4(payload.accColor, 1.0));
   } else {
-      imageStore(accumulationImage, ivec2(gl_LaunchIDNV.xy), ((imageLoad(accumulationImage, ivec2(gl_LaunchIDNV.xy)) * ubo.sampleCount) + vec4(payload.accColor, 1.0)) / (ubo.sampleCount + 1));
+      imageStore(accumulationImage, ivec2(gl_LaunchIDNV.xy), imageLoad(accumulationImage, ivec2(gl_LaunchIDNV.xy)) + vec4(payload.accColor, 1.0));
   }
 }

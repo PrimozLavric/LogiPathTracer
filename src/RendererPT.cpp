@@ -10,6 +10,8 @@
 RendererPT::RendererPT(const cppglfw::Window& window, const RendererConfiguration& configuration)
   : RendererCore(window, configuration), allocator_(logicalDevice_.createMemoryAllocator()),
     sceneConverter_(allocator_, graphicsFamilyCmdPool_, graphicsQueue_) {
+  srand(static_cast<unsigned>(time(0)));
+
   createTexViewerRenderPass();
   createFrameBuffers();
 
@@ -41,7 +43,7 @@ void RendererPT::loadScene(const lsg::Ref<lsg::Scene>& scene) {
   auto cameraData = cameras[0]->getComponent<lsg::PerspectiveCamera>();
   ubo_.camera.fovY = cameraData->fov();
   ubo_.camera.worldMatrix = selectedCameraTransform_->worldMatrix();
-  ubo_.sampleCount = 0;
+  ubo_.reset = true;
 
   initializeAndBindSceneBuffer();
   sceneLoaded_ = true;
@@ -226,7 +228,7 @@ void RendererPT::onSwapChainRecreate() {
   initializeAccumulationTexture();
   updateAccumulationTexDescriptorSet();
   recordCommandBuffers();
-  ubo_.sampleCount = 0;
+  ubo_.reset = true;
 }
 
 void RendererPT::initializeAccumulationTexture() {
@@ -388,19 +390,44 @@ void RendererPT::initializeUBOBuffer() {
   bufferInfo.offset = 0;
   bufferInfo.range = sizeof(ubo_);
 
-  vk::WriteDescriptorSet descriptorWrite;
-  descriptorWrite.dstSet = pathTracingDescSets_[0];
-  descriptorWrite.dstBinding = 1;
-  descriptorWrite.dstArrayElement = 0;
-  descriptorWrite.descriptorType = vk::DescriptorType::eUniformBuffer;
-  descriptorWrite.descriptorCount = 1;
-  descriptorWrite.pBufferInfo = &bufferInfo;
+  std::array<vk::WriteDescriptorSet, 2> descriptorWrites;
+  descriptorWrites[0].dstSet = pathTracingDescSets_[0];
+  descriptorWrites[0].dstBinding = 1;
+  descriptorWrites[0].dstArrayElement = 0;
+  descriptorWrites[0].descriptorType = vk::DescriptorType::eUniformBuffer;
+  descriptorWrites[0].descriptorCount = 1;
+  descriptorWrites[0].pBufferInfo = &bufferInfo;
 
-  logicalDevice_.updateDescriptorSets(descriptorWrite);
+  VmaAllocationCreateInfo sampleCountAllocationInfo = {};
+  sampleCountAllocationInfo.usage = VmaMemoryUsage::VMA_MEMORY_USAGE_CPU_TO_GPU;
+
+  // Create and init matrices UBO buffer.
+  vk::BufferCreateInfo sampleCountBufferCreateInfo;
+  sampleCountBufferCreateInfo.size = sizeof(invSampleCount);
+  sampleCountBufferCreateInfo.usage = vk::BufferUsageFlagBits::eUniformBuffer | vk::BufferUsageFlagBits::eTransferDst;
+  sampleCountBufferCreateInfo.sharingMode = vk::SharingMode::eExclusive;
+
+  sampleCountBuffer_ = allocator_.createBuffer(sampleCountBufferCreateInfo, sampleCountAllocationInfo);
+
+  // Update invCounter descriptor.
+  vk::DescriptorBufferInfo sampleCountBufferInfo;
+  sampleCountBufferInfo.buffer = sampleCountBuffer_;
+  sampleCountBufferInfo.offset = 0;
+  sampleCountBufferInfo.range = sizeof(invSampleCount);
+
+  descriptorWrites[1].dstSet = texViewerDescSets_[0];
+  descriptorWrites[1].dstBinding = 1;
+  descriptorWrites[1].dstArrayElement = 0;
+  descriptorWrites[1].descriptorType = vk::DescriptorType::eUniformBuffer;
+  descriptorWrites[1].descriptorCount = 1;
+  descriptorWrites[1].pBufferInfo = &sampleCountBufferInfo;
+
+  logicalDevice_.updateDescriptorSets(descriptorWrites);
 }
 
 void RendererPT::updateUBOBuffer() {
   uboBuffer_.writeToBuffer(&ubo_, sizeof(ubo_));
+  sampleCountBuffer_.writeToBuffer(&invSampleCount, sizeof(invSampleCount));
 }
 
 void RendererPT::initializeAndBindSceneBuffer() {
@@ -547,9 +574,17 @@ static std::chrono::time_point<std::chrono::high_resolution_clock> startTime;
 void RendererPT::preDraw() {
   if (selectedCameraTransform_->isWorldMatrixDirty()) {
     ubo_.camera.worldMatrix = selectedCameraTransform_->worldMatrix();
-    ubo_.sampleCount = 0;
+    ubo_.reset = true;
+    sampleCount = 1;
+  } else {
+    ubo_.reset = false;
   }
-  if (ubo_.sampleCount == 0) {
+
+  invSampleCount = 1.0f / sampleCount;
+  ubo_.random.x = rand();
+  ubo_.random.y = rand();
+
+  if (sampleCount == 1) {
     startTime = std::chrono::high_resolution_clock::now();
   }
 
@@ -557,16 +592,16 @@ void RendererPT::preDraw() {
 }
 
 void RendererPT::postDraw() {
-  ubo_.sampleCount++;
-  if (ubo_.sampleCount % 10 == 0) {
-    std::cout << "Sample: " << ubo_.sampleCount << std::endl;
+  sampleCount++;
+  if (sampleCount % 10 == 0) {
+    std::cout << "Sample: " << sampleCount << std::endl;
 
-    if (ubo_.sampleCount % 100 == 0) {
+    if (sampleCount % 100 == 0) {
       auto dt =
         std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - startTime)
           .count() /
         1000.0f;
-      std::cout << "Samples per second: " << ubo_.sampleCount / dt << std::endl;
+      std::cout << "Samples per second: " << sampleCount / dt << std::endl;
     }
   }
 }

@@ -3,6 +3,7 @@
 #extension GL_EXT_nonuniform_qualifier : require
 #extension GL_GOOGLE_include_directive : require
 
+
 #include "uniforms.glsl"
 
 #include "../heitz/BSDF.glsl"
@@ -15,7 +16,7 @@
 layout(location = 0) rayPayloadInNV RayPayload payload;
 hitAttributeNV vec3 attribs;
 
-//#define USE_MICROFACET
+#define USE_MICROFACET
 
 void main() {
   seed = payload.seed;
@@ -80,7 +81,6 @@ void main() {
   viewDir.y = dot(-gl_WorldRayDirectionNV, v);
   viewDir.z = dot(-gl_WorldRayDirectionNV, ffNormal);
 
-
   if (interaction == kDiff) {
     #ifdef USE_MICROFACET
       payload.mask *= DiffuseBSDF(baseColorFactor.xyz, viewDir, roughnessFactor, lightDir);
@@ -95,7 +95,6 @@ void main() {
       #endif
   } else if (interaction == kTrans) {
     bool outside = dot(normal, -gl_WorldRayDirectionNV) > 0.0f;
-
     #ifdef USE_MICROFACET
       payload.mask *= DielectricBSDF(baseColorFactor.xyz, viewDir, roughnessFactor, transmissionFactor, ior, lightDir, outside);
     #else
@@ -103,18 +102,18 @@ void main() {
     #endif
   }
 
+
   lightDir = lightDir.x * u + lightDir.y * v + lightDir.z * ffNormal;
 
   // Increment depth
   payload.depth += 1;
 
-  float maskLength = length(payload.mask);
-  if (maskLength < 0.5 && payload.depth > RUSSIAN_ROULETTE_DEPTH) {
-      float q = max(0.05f, 1.0f - maskLength);
-      if (rand() < q) {
+  float q = max(max(payload.mask.x, payload.mask.y), payload.mask.z);
+  if (q < 0.5 && payload.depth > RUSSIAN_ROULETTE_DEPTH) {
+      if (rand() > q) {
           return;
       }
-      payload.mask /= 1.0f - q;
+      payload.mask *= 1.0f / q;
   }
 
   payload.seed = seed;

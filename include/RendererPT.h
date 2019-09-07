@@ -56,7 +56,8 @@ class RendererPT : public RendererCore {
 
   struct PathTracerUBO {
     CameraGPU camera;
-    uint32_t sampleCount = 0;
+    glm::uvec2 random;
+    VkBool32 reset;
   };
 
   logi::DescriptorPool descriptorPool_;
@@ -78,6 +79,10 @@ class RendererPT : public RendererCore {
 
   PathTracerUBO ubo_;
   logi::VMABuffer uboBuffer_;
+
+  uint32_t sampleCount = 1;
+  float invSampleCount = 1;
+  logi::VMABuffer sampleCountBuffer_;
 
   std::atomic<bool> sceneLoaded_ = false;
   lsg::Ref<lsg::Transform> selectedCameraTransform_;

@@ -40,7 +40,7 @@ class RendererRTX : public RendererCore {
 
   void updateAccumulationTexDescriptorSet();
 
-  void initializeUBOBuffer();
+  void initializeUBOs();
 
   void updateUBOBuffer();
 
@@ -67,7 +67,8 @@ class RendererRTX : public RendererCore {
 
   struct PathTracerUBO {
     CameraGPU camera;
-    uint32_t sampleCount = 0;
+    glm::vec2 random;
+    vk::Bool32 reset;
   };
 
   vk::PhysicalDeviceRayTracingPropertiesNV rayTracingProperties_;
@@ -92,6 +93,10 @@ class RendererRTX : public RendererCore {
 
   PathTracerUBO ubo_;
   logi::VMABuffer uboBuffer_;
+
+  uint32_t sampleCount = 1;
+  float invSampleCount = 1;
+  logi::VMABuffer sampleCountBuffer_;
 
   RTXSceneConverter sceneConverter_;
   std::atomic<bool> sceneLoaded_ = false;

@@ -9,6 +9,8 @@
 RendererRTX::RendererRTX(const cppglfw::Window& window, const RendererConfiguration& configuration)
   : RendererCore(window, configuration), allocator_(logicalDevice_.createMemoryAllocator()),
     sceneConverter_(allocator_, graphicsFamilyCmdPool_, graphicsQueue_) {
+  srand(static_cast<unsigned>(time(0)));
+
   // Fetch ray tracing properties.
   rayTracingProperties_ =
     physicalDevice_.getProperties2<vk::PhysicalDeviceProperties2, vk::PhysicalDeviceRayTracingPropertiesNV>()
@@ -29,8 +31,7 @@ RendererRTX::RendererRTX(const cppglfw::Window& window, const RendererConfigurat
   initializeAccumulationTexture();
   initializeDescriptorSets();
   updateAccumulationTexDescriptorSet();
-  initializeUBOBuffer();
-  // recordCommandBuffers();
+  initializeUBOs();
 }
 
 void RendererRTX::loadScene(const lsg::Ref<lsg::Scene>& scene) {
@@ -55,7 +56,7 @@ void RendererRTX::loadScene(const lsg::Ref<lsg::Scene>& scene) {
 
   ubo_.camera.fovY = camPerspective->fov();
   ubo_.camera.worldMatrix = selectedCameraTransform_->worldMatrix();
-  ubo_.sampleCount = 0;
+  ubo_.reset = true;
 
   initializeAndBindSceneBuffer();
   sceneLoaded_ = true;
@@ -307,7 +308,7 @@ void RendererRTX::onSwapChainRecreate() {
   initializeAccumulationTexture();
   updateAccumulationTexDescriptorSet();
   recordCommandBuffers();
-  ubo_.sampleCount = 0;
+  ubo_.reset = true;
 }
 
 void RendererRTX::initializeAccumulationTexture() {
@@ -349,8 +350,8 @@ void RendererRTX::initializeAccumulationTexture() {
   changeLayoutBarrier.subresourceRange.layerCount = 1u;
   changeLayoutBarrier.subresourceRange.baseMipLevel = 0u;
   changeLayoutBarrier.subresourceRange.levelCount = 1u;
-  cmdBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eHost, vk::PipelineStageFlagBits::eComputeShader, {}, {}, {},
-                            changeLayoutBarrier);
+  cmdBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eHost, vk::PipelineStageFlagBits::eRayTracingShaderNV, {}, {},
+                            {}, changeLayoutBarrier);
 
   cmdBuffer.end();
 
@@ -390,7 +391,7 @@ void RendererRTX::initializeAccumulationTexture() {
 void RendererRTX::initializeDescriptorSets() {
   static const size_t numPoolSets = 10;
   static const std::vector<vk::DescriptorPoolSize> poolSizes = {//{vk::DescriptorType::eSampler, 0},
-                                                                {vk::DescriptorType::eCombinedImageSampler, 1},
+                                                                {vk::DescriptorType::eCombinedImageSampler, 600},
                                                                 //{vk::DescriptorType::eSampledImage, 0},
                                                                 {vk::DescriptorType::eStorageImage, 1},
                                                                 //{vk::DescriptorType::eUniformTexelBuffer, 0},
@@ -449,7 +450,7 @@ void RendererRTX::updateAccumulationTexDescriptorSet() {
   logicalDevice_.updateDescriptorSets(descriptorWrites);
 }
 
-void RendererRTX::initializeUBOBuffer() {
+void RendererRTX::initializeUBOs() {
   VmaAllocationCreateInfo allocationInfo = {};
   allocationInfo.usage = VmaMemoryUsage::VMA_MEMORY_USAGE_CPU_TO_GPU;
 
@@ -467,19 +468,44 @@ void RendererRTX::initializeUBOBuffer() {
   bufferInfo.offset = 0;
   bufferInfo.range = sizeof(ubo_);
 
-  vk::WriteDescriptorSet descriptorWrite;
-  descriptorWrite.dstSet = pathTracingDescSets_[0];
-  descriptorWrite.dstBinding = 1;
-  descriptorWrite.dstArrayElement = 0;
-  descriptorWrite.descriptorType = vk::DescriptorType::eUniformBuffer;
-  descriptorWrite.descriptorCount = 1;
-  descriptorWrite.pBufferInfo = &bufferInfo;
+  std::array<vk::WriteDescriptorSet, 2> descriptorWrites;
+  descriptorWrites[0].dstSet = pathTracingDescSets_[0];
+  descriptorWrites[0].dstBinding = 1;
+  descriptorWrites[0].dstArrayElement = 0;
+  descriptorWrites[0].descriptorType = vk::DescriptorType::eUniformBuffer;
+  descriptorWrites[0].descriptorCount = 1;
+  descriptorWrites[0].pBufferInfo = &bufferInfo;
 
-  logicalDevice_.updateDescriptorSets(descriptorWrite);
+  VmaAllocationCreateInfo sampleCountAllocationInfo = {};
+  sampleCountAllocationInfo.usage = VmaMemoryUsage::VMA_MEMORY_USAGE_CPU_TO_GPU;
+
+  // Create and init matrices UBO buffer.
+  vk::BufferCreateInfo sampleCountBufferCreateInfo;
+  sampleCountBufferCreateInfo.size = sizeof(invSampleCount);
+  sampleCountBufferCreateInfo.usage = vk::BufferUsageFlagBits::eUniformBuffer | vk::BufferUsageFlagBits::eTransferDst;
+  sampleCountBufferCreateInfo.sharingMode = vk::SharingMode::eExclusive;
+
+  sampleCountBuffer_ = allocator_.createBuffer(sampleCountBufferCreateInfo, sampleCountAllocationInfo);
+
+  // Update invCounter descriptor.
+  vk::DescriptorBufferInfo sampleCountBufferInfo;
+  sampleCountBufferInfo.buffer = sampleCountBuffer_;
+  sampleCountBufferInfo.offset = 0;
+  sampleCountBufferInfo.range = sizeof(invSampleCount);
+
+  descriptorWrites[1].dstSet = texViewerDescSets_[0];
+  descriptorWrites[1].dstBinding = 1;
+  descriptorWrites[1].dstArrayElement = 0;
+  descriptorWrites[1].descriptorType = vk::DescriptorType::eUniformBuffer;
+  descriptorWrites[1].descriptorCount = 1;
+  descriptorWrites[1].pBufferInfo = &sampleCountBufferInfo;
+
+  logicalDevice_.updateDescriptorSets(descriptorWrites);
 }
 
 void RendererRTX::updateUBOBuffer() {
   uboBuffer_.writeToBuffer(&ubo_, sizeof(ubo_));
+  sampleCountBuffer_.writeToBuffer(&invSampleCount, sizeof(invSampleCount));
 }
 
 void RendererRTX::initializeAndBindSceneBuffer() {
@@ -617,10 +643,15 @@ static std::chrono::time_point<std::chrono::high_resolution_clock> startTime;
 void RendererRTX::preDraw() {
   if (selectedCameraTransform_->isWorldMatrixDirty()) {
     ubo_.camera.worldMatrix = selectedCameraTransform_->worldMatrix();
-    ubo_.sampleCount = 0;
+    ubo_.reset = true;
+    sampleCount = 1;
   }
 
-  if (ubo_.sampleCount == 0) {
+  invSampleCount = 1.0f / sampleCount;
+  ubo_.random.x = rand();
+  ubo_.random.y = rand();
+
+  if (sampleCount == 1) {
     startTime = std::chrono::high_resolution_clock::now();
   }
 
@@ -628,16 +659,17 @@ void RendererRTX::preDraw() {
 }
 
 void RendererRTX::postDraw() {
-  ubo_.sampleCount++;
-  if (ubo_.sampleCount % 10 == 0) {
-    std::cout << "Sample: " << ubo_.sampleCount << std::endl;
+  ubo_.reset = false;
+  sampleCount++;
+  if (sampleCount % 10 == 0) {
+    std::cout << "Sample: " << sampleCount << std::endl;
 
-    if (ubo_.sampleCount % 100 == 0) {
+    if (sampleCount % 100 == 0) {
       auto dt =
         std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - startTime)
           .count() /
         1000.0f;
-      std::cout << "Samples per second: " << ubo_.sampleCount / dt << std::endl;
+      std::cout << "Samples per second: " << sampleCount / dt << std::endl;
     }
   }
 }

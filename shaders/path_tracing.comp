@@ -12,6 +12,7 @@
 
 precision highp float;
 
+
 #define WORKGROUP_SIZE 32
 layout (local_size_x = WORKGROUP_SIZE, local_size_y = WORKGROUP_SIZE, local_size_z = 1) in;
 
@@ -81,7 +82,8 @@ layout (set = 0, binding = 0, rgba32f) uniform image2D accumulationImage;
 
 layout (std140, set = 0, binding = 1) uniform UBO {
     Camera camera;
-    uint sampleCount;
+    uvec2 seed;
+    bool reset;
 } ubo;
 
 layout(std430, set = 0, binding = 2) buffer ObjectsBuffer {
@@ -285,6 +287,7 @@ vec3 traceRay(Ray ray) {
         viewDir.y = dot(-ray.direction, v);
         viewDir.z = dot(-ray.direction, ffNormal);
 
+
         if (interaction == kDiff) {
             #ifdef USE_MICROFACET
             mask *= DiffuseBSDF(baseColorFactor.xyz, viewDir, roughnessFactor, lightDir);
@@ -299,7 +302,6 @@ vec3 traceRay(Ray ray) {
             #endif
         } else if (interaction == kTrans) {
             bool outside = dot(normal, -ray.direction) > 0.0f;
-
             #ifdef USE_MICROFACET
             mask *= DielectricBSDF(baseColorFactor.xyz, viewDir, roughnessFactor, transmissionFactor, ior, lightDir, outside);
             #else
@@ -312,12 +314,12 @@ vec3 traceRay(Ray ray) {
         ray.origin = isectPositionWorld;
         ray.direction = lightDir;
 
-        if (length(mask) < 0.5 && bounce > RUSSIAN_ROULETTE_BOUNCES) {
-            float q = max(0.05f, 1.0f - length(mask));
-            if (rand() < q) {
+        float q = max(max(mask.x, mask.y), mask.z);
+        if (q < 0.5 && bounce > RUSSIAN_ROULETTE_BOUNCES) {
+            if (rand() > q) {
                 break;
             }
-            mask /= 1.0f - q;
+            mask *= 1.0f / q;
         }
     }
 
@@ -336,15 +338,15 @@ void main() {
         return;
     }
 
-    seed = uvec2((ubo.sampleCount, ubo.sampleCount + 1) * gl_GlobalInvocationID.xy);
+    seed = uvec2(ubo.seed * gl_GlobalInvocationID.xy);
 
     Ray ray = generateRay(resolution);
     vec3 sampleColor = traceRay(ray);
 
     // store to the storage buffer:
-    if (ubo.sampleCount == 0) {
+    if (ubo.reset) {
         imageStore(accumulationImage, ivec2(gl_GlobalInvocationID.xy), vec4(sampleColor, 1.0));
     } else {
-        imageStore(accumulationImage, ivec2(gl_GlobalInvocationID.xy), ((imageLoad(accumulationImage, ivec2(gl_GlobalInvocationID.xy)) * ubo.sampleCount) + vec4(sampleColor, 1.0)) / (ubo.sampleCount + 1));
+        imageStore(accumulationImage, ivec2(gl_GlobalInvocationID.xy), imageLoad(accumulationImage, ivec2(gl_GlobalInvocationID.xy)) + vec4(sampleColor, 1.0));
     }
 }
