@@ -45,7 +45,7 @@ target_include_directories(logi_path_tracer PUBLIC
         $<INSTALL_INTERFACE:include>
         )
 
-target_link_libraries(logi_path_tracer logi LogiSceneGraph CppGLFW websockets)
+target_link_libraries(logi_path_tracer logi LogiSceneGraph CppGLFW websockets lz4)
 
 # Copy resources directory.
 add_custom_command(TARGET logi_path_tracer POST_BUILD

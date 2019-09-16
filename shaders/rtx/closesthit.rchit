@@ -16,7 +16,7 @@
 layout(location = 0) rayPayloadInNV RayPayload payload;
 hitAttributeNV vec3 attribs;
 
-#define USE_MICROFACET
+//#define USE_MICROFACET
 
 void main() {
   seed = payload.seed;

@@ -1,0 +1,18 @@
+let port = 8080;
+
+let path = require('path');
+let bodyParser = require('body-parser');
+
+// Init express
+let express = require('express');
+let app = express();
+
+// Init express path
+app.use(express.static(path.resolve(__dirname + "/web")));
+app.use(bodyParser.json());
+
+// Create server and link it to express
+let server = require("http").createServer(app);
+
+server.listen(port);
+console.log("Listening on port: ", port);

@@ -1,0 +1,14 @@
+{
+  "name": "remote_rendering",
+  "version": "1.0.0",
+  "description": "",
+  "main": "App.js",
+  "scripts": {
+    "build": "browserify App.js -o bundle.js"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "lz4": "^0.6.3"
+  }
+}

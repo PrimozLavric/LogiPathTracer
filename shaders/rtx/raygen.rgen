@@ -22,7 +22,7 @@ Ray generateRay() {
   vec2 uv = 2.0 * vec2(gl_LaunchIDNV.xy) / vec2(gl_LaunchSizeNV.xy) - 1.0 + jitter;
   vec3 origin = ubo.camera.worldMatrix[3].xyz;
 
-  float aspectRatio = float(gl_LaunchSizeNV.x) / float(gl_LaunchSizeNV.y);
+  float aspectRatio = 1.0;//float(gl_LaunchSizeNV.x) / float(gl_LaunchSizeNV.y);
   uv.x *= aspectRatio * tan(ubo.camera.fovY / 2.0);
   uv.y *= tan(ubo.camera.fovY / 2.0);
 
